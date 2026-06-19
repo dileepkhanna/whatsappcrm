@@ -1,0 +1,261 @@
+# ============================================================
+# WhatsCRM v5.9.5 - Git Ignore File
+# Prevents sensitive and unnecessary files from being committed
+# ============================================================
+
+# ─── CRITICAL: Environment & Secrets ────────────────────────
+# NEVER commit these files - they contain passwords and API keys
+.env
+.env.*
+.env.local
+.env.production
+.env.development
+.env.test
+.env.backup
+*.env
+
+# ─── Dependencies ────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ─── Media & Uploads ─────────────────────────────────────────
+# User uploaded files (media, documents, images)
+client/public/media/*
+!client/public/media/.gitkeep
+client/public/meta-media/*
+!client/public/meta-media/.gitkeep
+
+# Telegram uploads (may have long filenames)
+client/public/telegram/
+
+# QR codes and session data
+qr-codes/
+sessions/
+*.session.json
+
+# ─── Database ────────────────────────────────────────────────
+# Database dumps and backups
+*.sql.backup
+*.sql.bak
+backup_*.sql
+*_backup.sql
+database_backup/
+backups/
+
+# Database files (SQLite, if used)
+*.sqlite
+*.sqlite3
+*.db
+
+# ─── Logs ────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+error.log
+access.log
+combined.log
+
+# PM2 logs
+pm2-error.log
+pm2-out.log
+.pm2/
+
+# ─── Operating System Files ──────────────────────────────────
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# ─── IDE & Editors ───────────────────────────────────────────
+# VSCode
+.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# IntelliJ IDEA / WebStorm
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+[._]sw[a-p]
+*.swp
+*.swo
+
+# Emacs
+*~
+\#*\#
+.\#*
+.projectile
+
+# ─── Testing ─────────────────────────────────────────────────
+test-screenshots/
+coverage/
+.nyc_output/
+*.test.js.snap
+
+# Playwright
+playwright-report/
+playwright/.cache/
+
+# ─── Build & Distribution ────────────────────────────────────
+dist/
+build/
+.next/
+.nuxt/
+
+# ─── Temporary Files ─────────────────────────────────────────
+tmp/
+temp/
+*.tmp
+*.temp
+.cache/
+
+# ─── SSL Certificates ────────────────────────────────────────
+# NEVER commit private keys or certificates
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+ssl/
+certs/
+
+# ─── Configuration Backups ───────────────────────────────────
+config.backup
+*.config.backup
+settings.backup
+
+# ─── WhatsApp Session Data ───────────────────────────────────
+# Baileys session files
+*.session
+session-*/
+auth_info.json
+auth_info_baileys/
+
+# ─── MongoDB ─────────────────────────────────────────────────
+# MongoDB dump files
+dump/
+mongodump/
+
+# ─── Redis ───────────────────────────────────────────────────
+dump.rdb
+appendonly.aof
+
+# ─── NPM/Yarn Cache ──────────────────────────────────────────
+.npm/
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# ─── Optional: Large Files ───────────────────────────────────
+# Uncomment if you want to exclude large files
+# *.mp4
+# *.mov
+# *.avi
+# *.zip
+# *.tar.gz
+# *.rar
+
+# ─── Custom Exclusions ───────────────────────────────────────
+# Add project-specific files here
+
+# Backup files from editors
+*.bak
+*.orig
+
+# Documentation drafts (if you use)
+# drafts/
+# notes.txt
+
+# Local development scripts
+local-*.sh
+local-*.bat
+
+# Personal notes and TODOs
+TODO.md
+NOTES.md
+.todo
+
+# ─── Keep These Files (Force Include) ────────────────────────
+# Use ! to force include important files even if parent folder is ignored
+
+# Keep .gitkeep files to preserve empty directories
+!**/.gitkeep
+
+# Keep example/template files
+!.env.example
+!config.example.js
+
+# Keep important documentation
+!README.md
+!LICENSE
+!CHANGELOG.md
+
+# ============================================================
+# IMPORTANT NOTES:
+# ============================================================
+# 1. If .env is already committed, remove it:
+#    git rm --cached .env
+#    git commit -m "Remove .env from version control"
+#
+# 2. Create .env.example with dummy values:
+#    cp .env .env.example
+#    # Then edit .env.example to remove sensitive data
+#
+# 3. Check what will be committed:
+#    git status
+#
+# 4. Test .gitignore:
+#    git check-ignore -v filename
+#
+# 5. If you accidentally commit sensitive files:
+#    - Remove from Git: git rm --cached filename
+#    - Consider the data compromised
+#    - Rotate all secrets immediately
+#    - Use git-filter-repo or BFG to clean history
+# ============================================================

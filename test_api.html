@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Currency API</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        .result { background: #f0f0f0; padding: 15px; margin: 10px 0; border-radius: 4px; }
+        .success { background: #d4edda; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; border: 1px solid #f5c6cb; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+        button:hover { background: #0056b3; }
+        pre { background: #2d2d2d; color: #f8f8f8; padding: 10px; border-radius: 4px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Test Currency Settings API</h1>
+        <p>This page tests if the API is returning correct currency data.</p>
+        
+        <button onclick="testAPI()">Test API</button>
+        <button onclick="clearAllCache()">Clear All Browser Data</button>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function testAPI() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '<p>Loading...</p>';
+            
+            try {
+                const response = await fetch('http://localhost:3010/api/web/get_web_public');
+                const data = await response.json();
+                
+                const currencyData = data.data;
+                const isCorrect = currencyData.currency_code === 'INR' && 
+                                 parseFloat(currencyData.exchange_rate) === 1.0;
+                
+                resultDiv.innerHTML = `
+                    <div class="result ${isCorrect ? 'success' : 'error'}">
+                        <h3>${isCorrect ? '✅ API Returns Correct Data!' : '❌ API Data Issue'}</h3>
+                        <pre>${JSON.stringify(currencyData, null, 2)}</pre>
+                        <p><strong>Currency:</strong> ${currencyData.currency_code}</p>
+                        <p><strong>Symbol:</strong> ${currencyData.currency_symbol}</p>
+                        <p><strong>Exchange Rate:</strong> ${currencyData.exchange_rate}</p>
+                        <p><strong>Calculation Test:</strong> Plan Price (2) × Exchange Rate (${currencyData.exchange_rate}) = ${2 * parseFloat(currencyData.exchange_rate)}</p>
+                        ${!isCorrect ? '<p style="color: red;">⚠️ Database not updated correctly!</p>' : '<p style="color: green;">✅ Database is correct. Problem is browser cache.</p>'}
+                    </div>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="result error">
+                        <h3>❌ Error</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function clearAllCache() {
+            // Clear LocalStorage
+            localStorage.clear();
+            
+            // Clear SessionStorage
+            sessionStorage.clear();
+            
+            // Clear IndexedDB
+            const databases = await indexedDB.databases();
+            for (const db of databases) {
+                indexedDB.deleteDatabase(db.name);
+            }
+            
+            // Clear Cookies
+            document.cookie.split(";").forEach(function(c) {
+                document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+            });
+            
+            alert('✅ All browser data cleared!\n\nNow:\n1. Close this tab\n2. Close ALL browser tabs for localhost:3010\n3. Re-open http://localhost:3010\n4. Login again\n5. Check checkout page');
+        }
+
+        // Auto-run test on load
+        window.onload = testAPI;
+    </script>
+</body>
+</html>

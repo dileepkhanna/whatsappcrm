@@ -1,0 +1,366 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"/><link rel="icon" href="/favicon.ico"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="theme-color" content="#000000"/><meta name="description" content="WhatsCRM is an all-in-one cloud-based platform for WhatsApp, Instagram, and Telegram marketing and automation."/><link rel="apple-touch-icon" href="/logo192.png"/><link rel="manifest" href="/manifest.json"/><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;600;700&display=swap"/><title>whatsCRM</title><meta property="og:description" content="WhatsCRM is an all-in-one cloud-based platform for WhatsApp, Instagram, and Telegram marketing and automation."/><meta name="twitter:description" content="WhatsCRM is an all-in-one cloud-based platform for WhatsApp, Instagram, and Telegram marketing and automation."/><meta property="og:title" content="whatsCRM"/><meta name="twitter:title" content="whatsCRM"/><meta name="application-name" content="whatsCRM"/><meta name="apple-mobile-web-app-title" content="whatsCRM"/><meta property="og:image" content="/media/SKY74m0bbNj1U0o2X286vyDbjnBIk2Tm.png"/><meta name="twitter:image" content="/media/SKY74m0bbNj1U0o2X286vyDbjnBIk2Tm.png"/><style>
+/* ========================================
+   CURSOR VISIBILITY FIX FOR LIGHT MODE
+   ======================================== */
+
+/* Make cursor more visible with a shadow/outline effect */
+* {
+  cursor: inherit !important;
+}
+
+body {
+  cursor: default;
+  /* Add a custom cursor with better visibility */
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="black" stroke="white" stroke-width="2" d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>') 0 0, auto;
+}
+
+/* Enhanced cursor for clickable elements */
+button,
+a,
+[role="button"],
+.clickable,
+input[type="button"],
+input[type="submit"] {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="black" stroke="white" stroke-width="2" d="M10 6H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-2"/><path fill="black" stroke="white" stroke-width="1.5" d="M9 12l2 2 4-4"/></svg>') 8 8, pointer !important;
+}
+
+/* For draggable elements (flow builder nodes) */
+[draggable="true"],
+.react-flow__node,
+.draggable {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="black" stroke="white" stroke-width="2" d="M11 18c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>') 12 12, grab !important;
+}
+
+[draggable="true"]:active,
+.react-flow__node:active,
+.draggable:active {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="black" stroke="white" stroke-width="2" d="M11 18c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>') 12 12, grabbing !important;
+}
+
+/* Input fields */
+input,
+textarea,
+select {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="black" stroke="white" stroke-width="2" d="M12 2L12 6M12 18L12 22M2 12L6 12M18 12L22 12"/></svg>') 12 12, text !important;
+}
+
+/* Resize cursor */
+.resize,
+[style*="resize"] {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="black" stroke="white" stroke-width="2" d="M4 9l5-5 5 5M9 4v16m6-11l5 5-5 5"/></svg>') 12 12, nwse-resize !important;
+}
+
+/* Alternative: Windows-style cursor with high contrast */
+@media (prefers-contrast: high) {
+  body {
+    cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="black" stroke="yellow" stroke-width="3" d="M4 4l9.42 21.63 3.34-9.85 9.85-3.34L4 4z"/></svg>') 0 0, auto;
+  }
+}
+
+/* Fallback for browsers that don't support custom cursors */
+@supports not (cursor: url('data:image/svg+xml')) {
+  body {
+    cursor: default;
+  }
+  
+  button, a, [role="button"] {
+    cursor: pointer !important;
+  }
+  
+  [draggable="true"], .react-flow__node {
+    cursor: grab !important;
+  }
+  
+  [draggable="true"]:active, .react-flow__node:active {
+    cursor: grabbing !important;
+  }
+  
+  input, textarea, select {
+    cursor: text !important;
+  }
+}
+
+/* Additional visibility enhancement for light mode */
+body:not([data-theme="dark"]) {
+  /* Add a subtle shadow to all cursors in light mode for better visibility */
+  filter: drop-shadow(0 0 1px rgba(0,0,0,0.5));
+}
+</style>
+
+<script>
+/* ========================================
+   COMPREHENSIVE FIX: Sidebar & Search Issues
+   - Fix 1: Prevent email auto-fill in search bar
+   - Fix 2: Keep sidebar interactive after navigation
+   ======================================== */
+(function() {
+  console.log('🔧 Initializing sidebar and search fixes...');
+  
+  // Special fix for Social Login menu item click
+  function fixSocialLoginClick() {
+    // Find all elements that might be the Social Login menu item
+    const allClickables = document.querySelectorAll('a, button, [role="button"], li, div[class*="menu"]');
+    
+    allClickables.forEach(element => {
+      const text = element.textContent || '';
+      const href = element.getAttribute('href') || '';
+      
+      // Check if this is the Social Login menu item
+      if ((text.toLowerCase().includes('social') && text.toLowerCase().includes('login')) ||
+          href.includes('social-login')) {
+        
+        // Check if we already added our listener
+        if (element.dataset.fixedClick === 'true') return;
+        element.dataset.fixedClick = 'true';
+        
+        // Add our click handler in capture phase (runs before React's)
+        element.addEventListener('click', function(e) {
+          console.log('🎯 Social Login clicked - preventing search trigger');
+          
+          // Prevent the click from propagating to search
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          
+          // Navigate directly
+          setTimeout(() => {
+            window.location.hash = '';
+            
+            // For React Router, update the URL
+            const newUrl = '/admin?page=social-login';
+            if (window.location.pathname + window.location.search !== newUrl) {
+              window.history.pushState(null, '', newUrl);
+              window.dispatchEvent(new PopStateEvent('popstate'));
+            }
+            
+            // Clear search immediately and multiple times
+            for (let i = 0; i < 5; i++) {
+              setTimeout(() => {
+                clearEmailFromSearch();
+                clearSearchResults();
+              }, i * 100);
+            }
+          }, 0);
+          
+          return false;
+        }, true); // Use capture phase - runs BEFORE React's handlers
+        
+        console.log('✅ Fixed Social Login menu item click handler');
+      }
+    });
+  }
+  
+  // Run the fix after React renders
+  setTimeout(fixSocialLoginClick, 2000);
+  setTimeout(fixSocialLoginClick, 4000); // Run again to catch lazy-loaded elements
+  
+  // Re-run when DOM changes (React re-renders)
+  let fixTimeout;
+  const fixObserver = new MutationObserver(() => {
+    clearTimeout(fixTimeout);
+    fixTimeout = setTimeout(fixSocialLoginClick, 500);
+  });
+  
+  if (document.body) {
+    fixObserver.observe(document.body, { childList: true, subtree: true });
+  }
+  
+  // Fix 1: Prevent email auto-fill in search bar
+  function clearEmailFromSearch() {
+    const searchInputs = document.querySelectorAll('input[type="search"], input[placeholder*="search" i]');
+    searchInputs.forEach(input => {
+      if (input.value && input.value.includes('@') && document.activeElement !== input) {
+        console.log('🧹 Clearing email from search:', input.value);
+        input.value = '';
+        const event = new Event('input', { bubbles: true, cancelable: true });
+        input.dispatchEvent(event);
+      }
+    });
+    
+    // Also clear any search results overlay/panel
+    clearSearchResults();
+  }
+  
+  // Clear search results panel that shows "No results found"
+  function clearSearchResults() {
+    // Strategy 1: Click the close/clear button if it exists
+    const closeButtonSelectors = [
+      'button[aria-label*="close" i]',
+      'button[aria-label*="clear" i]',
+      '[class*="close"]',
+      '[class*="Clear"]',
+      'button:has-text("×")',
+      'button:has-text("✕")',
+      '[class*="search"] button',
+      'svg[class*="close"]'
+    ];
+    
+    let closedSearch = false;
+    closeButtonSelectors.forEach(selector => {
+      try {
+        const buttons = document.querySelectorAll(selector);
+        buttons.forEach(btn => {
+          // Check if this is near a search input
+          const parent = btn.closest('[class*="search"], [class*="Search"]');
+          if (parent && btn.offsetParent !== null) {
+            console.log('🗑️ Clicking search close button');
+            btn.click();
+            closedSearch = true;
+          }
+        });
+      } catch (e) {
+        // Selector might not work, skip
+      }
+    });
+    
+    if (closedSearch) return;
+    
+    // Strategy 2: Hide search results overlay/panel
+    const possibleResultSelectors = [
+      '[class*="search-result"]',
+      '[class*="searchResult"]',
+      '[class*="SearchResult"]',
+      '[class*="search-panel"]',
+      '[class*="searchPanel"]',
+      '[class*="no-result"]',
+      '[class*="noResult"]'
+    ];
+    
+    possibleResultSelectors.forEach(selector => {
+      try {
+        const elements = document.querySelectorAll(selector);
+        elements.forEach(el => {
+          // Check if it contains "No results" or similar text
+          const text = el.textContent || '';
+          if (text.toLowerCase().includes('no result') || 
+              text.toLowerCase().includes('no menu') ||
+              text.toLowerCase().includes('not found')) {
+            // Hide the element
+            if (el.style.display !== 'none' && el.offsetParent !== null) {
+              console.log('🗑️ Hiding search results panel');
+              el.style.display = 'none';
+              el.style.visibility = 'hidden';
+              el.style.opacity = '0';
+              el.style.pointerEvents = 'none';
+            }
+          }
+        });
+      } catch (e) {
+        // Selector might not be valid, skip
+      }
+    });
+    
+    // Strategy 3: Press Escape key to close search
+    if (!closedSearch) {
+      const searchInput = document.querySelector('input[type="search"], input[placeholder*="search" i]');
+      if (searchInput && searchInput.value === '') {
+        // Blur the input to close any dropdowns
+        if (document.activeElement === searchInput) {
+          searchInput.blur();
+          console.log('🗑️ Blurred search input to close results');
+        }
+      }
+    }
+  }
+  
+  // Fix 2: Re-enable sidebar elements if they get disabled
+  function ensureSidebarActive() {
+    // Find sidebar elements
+    const sidebarSelectors = [
+      '[class*="sidebar"]',
+      '[class*="Sidebar"]',
+      'nav',
+      'aside',
+      '[role="navigation"]'
+    ];
+    
+    sidebarSelectors.forEach(selector => {
+      const elements = document.querySelectorAll(selector);
+      elements.forEach(element => {
+        // Remove pointer-events: none if applied
+        if (window.getComputedStyle(element).pointerEvents === 'none') {
+          console.log('🔓 Re-enabling sidebar element:', element.tagName);
+          element.style.pointerEvents = 'auto';
+        }
+        
+        // Remove disabled class patterns
+        const classList = element.className || '';
+        if (classList.includes('disabled') || classList.includes('Disabled')) {
+          console.log('🔓 Removing disabled class from sidebar');
+          element.className = classList.replace(/disabled|Disabled/gi, '');
+        }
+        
+        // Ensure clickable children are active
+        const clickables = element.querySelectorAll('a, button, [role="button"]');
+        clickables.forEach(item => {
+          if (window.getComputedStyle(item).pointerEvents === 'none') {
+            item.style.pointerEvents = 'auto';
+          }
+          if (item.hasAttribute('disabled')) {
+            item.removeAttribute('disabled');
+          }
+        });
+      });
+    });
+  }
+  
+  // Run both fixes periodically
+  setInterval(() => {
+    clearEmailFromSearch();
+    ensureSidebarActive();
+    
+    // Check if we're on social-login page and search is showing
+    if (window.location.href.includes('social-login')) {
+      const searchInput = document.querySelector('input[type="search"], input[placeholder*="search" i]');
+      if (searchInput && (searchInput.value !== '' || searchInput === document.activeElement)) {
+        console.log('⚠️ Search active on Social Login page, clearing...');
+        searchInput.value = '';
+        searchInput.blur();
+        clearSearchResults();
+      }
+    }
+  }, 500);
+  
+  // Also run on route changes
+  let lastPath = window.location.href;
+  setInterval(() => {
+    if (window.location.href !== lastPath) {
+      console.log('📍 Route changed to:', window.location.pathname + window.location.search);
+      lastPath = window.location.href;
+      
+      setTimeout(() => {
+        clearEmailFromSearch();
+        ensureSidebarActive();
+      }, 300);
+    }
+  }, 300);
+  
+  // Run on DOM changes (React re-renders)
+  const observer = new MutationObserver(() => {
+    ensureSidebarActive();
+  });
+  
+  // Start observing when body is ready
+  const startObserving = () => {
+    if (document.body) {
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'disabled']
+      });
+      console.log('✅ Sidebar protection active');
+    }
+  };
+  
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startObserving);
+  } else {
+    startObserving();
+  }
+  
+  console.log('✅ Fixes initialized - sidebar will stay active, search will stay clean');
+})();
+</script>
+
+<script defer="defer" src="/static/js/main.dca03fbf.js"></script><link href="/static/css/main.e546b2bd.css" rel="stylesheet"></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div></body></html>

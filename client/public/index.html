@@ -374,18 +374,23 @@ body:not([data-theme="dark"]) {
   async function populateFromDropdown() {
     try {
       // Get user token from localStorage
-      const userDataStr = localStorage.getItem('wacrm_user');
-      if (!userDataStr) {
-        console.log('⚠️ No user data found in localStorage');
+      let token = localStorage.getItem('wacrm_user');
+      
+      if (!token) {
+        console.log('⚠️ No user token found in localStorage');
         return;
       }
       
-      const userData = JSON.parse(userDataStr);
-      const token = userData.token;
-      
-      if (!token) {
-        console.log('⚠️ No token found in user data');
-        return;
+      // If it's a JSON object, extract the token
+      // Otherwise, use it directly (it's the JWT token itself)
+      try {
+        const userData = JSON.parse(token);
+        if (userData.token) {
+          token = userData.token;
+        }
+      } catch (e) {
+        // Token is already a string (JWT token), use it directly
+        console.log('✅ Using token directly from localStorage');
       }
       
       // Fetch Meta API keys

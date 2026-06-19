@@ -363,4 +363,206 @@ body:not([data-theme="dark"]) {
 })();
 </script>
 
-<script defer="defer" src="/static/js/main.dca03fbf.js"></script><link href="/static/css/main.e546b2bd.css" rel="stylesheet"></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div></body></html>
+<script defer="defer" src="/static/js/main.dca03fbf.js"></script><link href="/static/css/main.e546b2bd.css" rel="stylesheet">
+
+<!-- FIX: Populate "From" dropdown in Start New Conversation -->
+<script>
+(function() {
+  console.log('🔧 Initializing "Start New Conversation" dropdown fix...');
+  
+  // Function to fetch and populate Meta API phone numbers
+  async function populateFromDropdown() {
+    try {
+      // Get user token from localStorage
+      const userDataStr = localStorage.getItem('wacrm_user');
+      if (!userDataStr) {
+        console.log('⚠️ No user data found in localStorage');
+        return;
+      }
+      
+      const userData = JSON.parse(userDataStr);
+      const token = userData.token;
+      
+      if (!token) {
+        console.log('⚠️ No token found in user data');
+        return;
+      }
+      
+      // Fetch Meta API keys
+      const response = await fetch('/api/user/get_meta_keys', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        console.log('⚠️ Failed to fetch meta keys:', response.status);
+        return;
+      }
+      
+      const data = await response.json();
+      console.log('✅ Fetched meta keys:', data);
+      
+      if (!data.success || !data.data || data.data.length === 0) {
+        console.log('⚠️ No Meta API keys found');
+        return;
+      }
+      
+      // Find the "From" dropdown/select element
+      // Try multiple possible selectors
+      const selectors = [
+        'select[name="from"]',
+        'select[name="From"]',
+        'select[id*="from" i]',
+        'div[class*="MuiSelect"]',
+        'input[placeholder*="from" i]',
+        'select'
+      ];
+      
+      let foundDropdown = false;
+      
+      for (const selector of selectors) {
+        const dropdowns = document.querySelectorAll(selector);
+        
+        for (const dropdown of dropdowns) {
+          // Check if this is inside a dialog/modal for "Start New Conversation"
+          const dialog = dropdown.closest('[role="dialog"], .MuiDialog-root, [class*="modal"], [class*="Modal"]');
+          
+          if (!dialog) continue;
+          
+          // Check if dialog contains text related to starting conversation
+          const dialogText = dialog.textContent || '';
+          if (!dialogText.toLowerCase().includes('conversation') && 
+              !dialogText.toLowerCase().includes('from')) {
+            continue;
+          }
+          
+          console.log('📍 Found potential "From" dropdown:', dropdown);
+          
+          // If it's a Material-UI Select, we need to handle it differently
+          if (dropdown.classList.contains('MuiSelect-root') || 
+              dropdown.closest('.MuiSelect-root')) {
+            // Try to click the select to open options
+            dropdown.click();
+            
+            setTimeout(() => {
+              // Look for the menu that opened
+              const menu = document.querySelector('[role="listbox"], .MuiMenu-list');
+              if (menu && menu.children.length === 0) {
+                // Empty menu, need to populate it
+                console.log('📝 Populating Material-UI dropdown...');
+                
+                data.data.forEach((item, index) => {
+                  const option = document.createElement('li');
+                  option.className = 'MuiMenuItem-root';
+                  option.setAttribute('role', 'option');
+                  option.setAttribute('data-value', item.id || index);
+                  option.textContent = `${item.display_phone_number || item.business_phone_number_id}`;
+                  
+                  option.addEventListener('click', () => {
+                    // Store selected value
+                    dropdown.dataset.value = item.id || index;
+                    dropdown.dataset.phoneNumber = item.display_phone_number;
+                    dropdown.dataset.phoneNumberId = item.business_phone_number_id;
+                    console.log('✅ Selected phone:', item.display_phone_number);
+                  });
+                  
+                  menu.appendChild(option);
+                });
+                
+                foundDropdown = true;
+              }
+            }, 100);
+          }
+          // If it's a regular select element
+          else if (dropdown.tagName === 'SELECT') {
+            if (dropdown.options.length <= 1) {
+              console.log('📝 Populating regular select dropdown...');
+              
+              // Clear existing options
+              dropdown.innerHTML = '<option value="">Select Phone Number</option>';
+              
+              // Add options from API data
+              data.data.forEach((item, index) => {
+                const option = document.createElement('option');
+                option.value = item.id || index;
+                option.textContent = item.display_phone_number || item.business_phone_number_id;
+                option.dataset.phoneNumberId = item.business_phone_number_id;
+                dropdown.appendChild(option);
+              });
+              
+              foundDropdown = true;
+              console.log(`✅ Added ${data.data.length} phone numbers to dropdown`);
+            }
+          }
+        }
+      }
+      
+      if (!foundDropdown) {
+        console.log('⚠️ Could not find "From" dropdown to populate');
+      }
+      
+    } catch (error) {
+      console.error('❌ Error populating dropdown:', error);
+    }
+  }
+  
+  // Monitor for dialog/modal opening
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (node.nodeType === 1) { // Element node
+          // Check if it's a dialog/modal
+          if (node.matches && (
+              node.matches('[role="dialog"]') || 
+              node.matches('.MuiDialog-root') ||
+              node.matches('[class*="modal"]') ||
+              node.matches('[class*="Modal"]')
+          )) {
+            const text = node.textContent || '';
+            if (text.toLowerCase().includes('conversation') || text.toLowerCase().includes('from')) {
+              console.log('🎯 New conversation dialog opened, populating dropdown...');
+              setTimeout(populateFromDropdown, 500);
+              setTimeout(populateFromDropdown, 1000);
+              setTimeout(populateFromDropdown, 2000);
+            }
+          }
+        }
+      });
+    });
+  });
+  
+  // Start observing when body is ready
+  const startObserving = () => {
+    if (document.body) {
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+      console.log('✅ "Start New Conversation" fix active - monitoring for dialogs');
+    }
+  };
+  
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startObserving);
+  } else {
+    startObserving();
+  }
+  
+  // Also try to populate on any button click that might open the dialog
+  document.addEventListener('click', (e) => {
+    const target = e.target;
+    const text = target.textContent || '';
+    
+    if (text.toLowerCase().includes('conversation') || 
+        text.toLowerCase().includes('new message')) {
+      console.log('🎯 Conversation button clicked, will populate dropdown...');
+      setTimeout(populateFromDropdown, 500);
+      setTimeout(populateFromDropdown, 1000);
+    }
+  }, true);
+  
+  console.log('✅ Dropdown fix initialized');
+})();
+</script></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div></body></html>

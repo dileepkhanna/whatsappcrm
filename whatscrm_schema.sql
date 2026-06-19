@@ -586,6 +586,7 @@ CREATE TABLE IF NOT EXISTS `beta_api_logs` (
   `request` longtext DEFAULT NULL,
   `response` longtext DEFAULT NULL,
   `status` varchar(50) DEFAULT NULL,
+  `err` text DEFAULT NULL,
   `createdAt` datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

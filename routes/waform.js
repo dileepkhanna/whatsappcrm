@@ -326,6 +326,111 @@ router.post(
   },
 );
 
+// ─── UPDATE FORM ──────────────────────────────────────────────────────────────
+router.post(
+  "/update-form",
+  validateUser,
+  checkPlan,
+  checkWaForms,
+  async (req, res) => {
+    try {
+      const { id, name, description, fields = [] } = req.body;
+      
+      // Get existing form
+      const [existingForm] = await query(
+        `SELECT * FROM wa_forms WHERE id = ? AND uid = ?`,
+        [id, req.decode.uid],
+      );
+      if (!existingForm) return res.json({ success: false, msg: "Form not found" });
+
+      const metaApi = await getMetaConfig(req.decode.uid);
+      if (!metaApi)
+        return res.json({ success: false, msg: "Meta API not configured" });
+
+      const headers = {
+        Authorization: `Bearer ${metaApi.access_token}`,
+        "Content-Type": "application/json",
+      };
+
+      // 1. Deprecate old flow (Meta doesn't allow direct updates)
+      try {
+        await axios.delete(
+          `https://graph.facebook.com/${API_VERSION}/${existingForm.flow_id}`,
+          { headers }
+        );
+      } catch (err) {
+        console.log("Old flow deletion skipped:", err.response?.data?.error?.message);
+      }
+
+      // 2. Create new flow with updated content
+      const createRes = await axios.post(
+        `https://graph.facebook.com/${API_VERSION}/${metaApi.waba_id}/flows`,
+        { name, categories: ["CONTACT_US"] },
+        { headers },
+      );
+      const newFlowId = createRes.data.id;
+
+      // 3. Upload updated Flow JSON
+      const flowJSON = buildFlowJSON(name, fields);
+      const form = new FormData();
+      form.append("name", "flow.json");
+      form.append("asset_type", "FLOW_JSON");
+      form.append("file", Buffer.from(JSON.stringify(flowJSON)), {
+        filename: "flow.json",
+        contentType: "application/json",
+      });
+
+      const uploadRes = await axios.post(
+        `https://graph.facebook.com/${API_VERSION}/${newFlowId}/assets`,
+        form,
+        {
+          headers: {
+            Authorization: `Bearer ${metaApi.access_token}`,
+            ...form.getHeaders(),
+          },
+        },
+      );
+
+      if (uploadRes.data.validation_errors?.length > 0) {
+        return res.json({
+          success: false,
+          msg: "Flow JSON validation failed",
+          errors: uploadRes.data.validation_errors,
+        });
+      }
+
+      // 4. Publish new flow
+      await axios.post(
+        `https://graph.facebook.com/${API_VERSION}/${newFlowId}/publish`,
+        {},
+        { headers },
+      );
+
+      // 5. Update database with new flow_id and fields
+      await query(
+        `UPDATE wa_forms SET name = ?, description = ?, flow_id = ?, fields_json = ? WHERE id = ? AND uid = ?`,
+        [
+          name,
+          description || "",
+          newFlowId,
+          JSON.stringify(fields),
+          id,
+          req.decode.uid,
+        ],
+      );
+
+      res.json({ success: true, msg: "Form updated successfully", flowId: newFlowId });
+    } catch (err) {
+      console.error(err);
+      res.json({
+        success: false,
+        msg: err.response?.data?.error?.message || "Something went wrong",
+        error: err.response?.data || err.message,
+      });
+    }
+  },
+);
+
 // ─── SEND FORM ────────────────────────────────────────────────────────────────
 router.post(
   "/send-form",

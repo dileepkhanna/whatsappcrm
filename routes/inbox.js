@@ -650,7 +650,8 @@ async function handleMessages(change, uid, body) {
 router.get("/get_chats", validateUser, async (req, res) => {
   try {
     let data = [];
-    data = await query(`SELECT * FROM chats WHERE uid = ?`, [req.decode.uid]);
+    // ✅ FIXED: Changed from 'chats' to 'beta_chats' table
+    data = await query(`SELECT * FROM beta_chats WHERE uid = ? ORDER BY updatedAt DESC`, [req.decode.uid]);
     const getContacts = await query(`SELECT * FROM contact WHERE uid = ?`, [
       req.decode.uid,
     ]);

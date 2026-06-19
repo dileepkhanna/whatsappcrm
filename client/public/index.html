@@ -409,7 +409,7 @@ body:not([data-theme="dark"]) {
       const data = await response.json();
       console.log('✅ Fetched meta keys:', data);
       
-      if (!data.success || !data.data || data.data.length === 0) {
+      if (!data.success || !data.data) {
         console.log('⚠️ No Meta API keys found');
         return;
       }
@@ -458,7 +458,11 @@ body:not([data-theme="dark"]) {
                 // Empty menu, need to populate it
                 console.log('📝 Populating Material-UI dropdown...');
                 
-                data.data.forEach((item, index) => {
+                // Convert data.data to array if it's an object
+                const metaKeys = Array.isArray(data.data) ? data.data : [data.data];
+                console.log('📋 Meta keys array:', metaKeys);
+                
+                metaKeys.forEach((item, index) => {
                   const option = document.createElement('li');
                   option.className = 'MuiMenuItem-root';
                   option.setAttribute('role', 'option');
@@ -488,8 +492,12 @@ body:not([data-theme="dark"]) {
               // Clear existing options
               dropdown.innerHTML = '<option value="">Select Phone Number</option>';
               
+              // Convert data.data to array if it's an object
+              const metaKeys = Array.isArray(data.data) ? data.data : [data.data];
+              console.log('📋 Meta keys array:', metaKeys);
+              
               // Add options from API data
-              data.data.forEach((item, index) => {
+              metaKeys.forEach((item, index) => {
                 const option = document.createElement('option');
                 option.value = item.id || index;
                 option.textContent = item.display_phone_number || item.business_phone_number_id;

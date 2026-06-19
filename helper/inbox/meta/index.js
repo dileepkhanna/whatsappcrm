@@ -136,6 +136,7 @@ async function saveMessageToConversation({ uid, chatId, messageData }) {
       uid,
       chat_id: chatId,
       status: messageData.status || "",
+      sentBy: messageData.sentBy || (messageData.route === 'OUTGOING' ? 'human' : 'customer'),
       createdAt: new Date(),
     });
     return true;

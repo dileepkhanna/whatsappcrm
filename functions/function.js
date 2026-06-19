@@ -1643,12 +1643,32 @@ function sendMetaMsg(uid, msgObj, toNumber, savObj, chatId) {
         const chatPath = `${__dirname}/../conversations/inbox/${uid}/${chatId}.json`;
         addObjectToFile(finalSaveMsg, chatPath);
 
+        // Save message to beta_conversation table
+        await query(`INSERT INTO beta_conversation SET ?`, {
+          type: finalSaveMsg.type,
+          chat_id: chatId,
+          uid: uid,
+          status: finalSaveMsg.status || 'sent',
+          sentBy: 'human',
+          metaChatId: finalSaveMsg.metaChatId,
+          msgContext: JSON.stringify(finalSaveMsg.msgContext),
+          reaction: finalSaveMsg.reaction || '',
+          timestamp: finalSaveMsg.timestamp,
+          senderName: finalSaveMsg.senderName,
+          senderMobile: finalSaveMsg.senderMobile,
+          star: finalSaveMsg.star ? 1 : 0,
+          route: finalSaveMsg.route,
+          context: finalSaveMsg.context ? JSON.stringify(finalSaveMsg.context) : null,
+          origin: 'meta',
+          createdAt: new Date(),
+        });
+
         await query(
-          `UPDATE chats SET last_message_came = ?, last_message = ?, is_opened = ? WHERE chat_id = ?`,
+          `UPDATE beta_chats SET last_message_came = ?, last_message = ?, is_opened = ? WHERE chat_id = ?`,
           [userTimezone, JSON.stringify(finalSaveMsg), 1, chatId],
         );
 
-        await query(`UPDATE chats SET is_opened = ? WHERE chat_id = ?`, [
+        await query(`UPDATE beta_chats SET is_opened = ? WHERE chat_id = ?`, [
           1,
           chatId,
         ]);

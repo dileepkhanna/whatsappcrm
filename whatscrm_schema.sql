@@ -321,6 +321,7 @@ CREATE TABLE IF NOT EXISTS `beta_conversation` (
   `chat_id` varchar(255) NOT NULL,
   `uid` varchar(255) NOT NULL,
   `status` varchar(50) DEFAULT 'sent',
+  `sentBy` varchar(50) DEFAULT 'human',
   `err` text DEFAULT NULL,
   `metaChatId` varchar(255) DEFAULT NULL,
   `msgContext` text DEFAULT NULL,

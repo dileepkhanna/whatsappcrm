@@ -425,6 +425,10 @@ body:not([data-theme="dark"]) {
         'select'
       ];
       
+      // Convert data.data to array if it's an object
+      const metaKeys = Array.isArray(data.data) ? data.data : [data.data];
+      console.log('📋 Meta keys array:', metaKeys);
+      
       let foundDropdown = false;
       
       for (const selector of selectors) {

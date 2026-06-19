@@ -448,41 +448,37 @@ body:not([data-theme="dark"]) {
           // If it's a Material-UI Select, we need to handle it differently
           if (dropdown.classList.contains('MuiSelect-root') || 
               dropdown.closest('.MuiSelect-root')) {
-            // Try to click the select to open options
-            dropdown.click();
             
-            setTimeout(() => {
-              // Look for the menu that opened
-              const menu = document.querySelector('[role="listbox"], .MuiMenu-list');
-              if (menu && menu.children.length === 0) {
-                // Empty menu, need to populate it
-                console.log('📝 Populating Material-UI dropdown...');
-                
-                // Convert data.data to array if it's an object
-                const metaKeys = Array.isArray(data.data) ? data.data : [data.data];
-                console.log('📋 Meta keys array:', metaKeys);
-                
-                metaKeys.forEach((item, index) => {
-                  const option = document.createElement('li');
-                  option.className = 'MuiMenuItem-root';
-                  option.setAttribute('role', 'option');
-                  option.setAttribute('data-value', item.id || index);
-                  option.textContent = `${item.display_phone_number || item.business_phone_number_id}`;
-                  
-                  option.addEventListener('click', () => {
-                    // Store selected value
-                    dropdown.dataset.value = item.id || index;
-                    dropdown.dataset.phoneNumber = item.display_phone_number;
-                    dropdown.dataset.phoneNumberId = item.business_phone_number_id;
-                    console.log('✅ Selected phone:', item.display_phone_number);
-                  });
-                  
-                  menu.appendChild(option);
-                });
-                
-                foundDropdown = true;
+            console.log('📝 Populating Material-UI Select directly...');
+            
+            // Find the actual select element (might be hidden input)
+            const selectRoot = dropdown.closest('.MuiSelect-root') || dropdown;
+            const hiddenInput = selectRoot.querySelector('input[type="hidden"]');
+            const displayDiv = selectRoot.querySelector('[role="combobox"]');
+            
+            if (displayDiv) {
+              // Set display text
+              const displayText = metaKeys[0].display_phone_number || 
+                                  metaKeys[0].business_phone_number_id || 
+                                  'WhatsApp Number';
+              displayDiv.textContent = displayText;
+              displayDiv.setAttribute('aria-label', displayText);
+              
+              // Set hidden value if input exists
+              if (hiddenInput) {
+                hiddenInput.value = metaKeys[0].business_phone_number_id;
               }
-            }, 100);
+              
+              // Store in dataset
+              selectRoot.dataset.selectedValue = metaKeys[0].business_phone_number_id;
+              selectRoot.dataset.phoneNumber = metaKeys[0].display_phone_number;
+              selectRoot.dataset.phoneNumberId = metaKeys[0].business_phone_number_id;
+              
+              console.log('✅ Set dropdown value:', displayText);
+              foundDropdown = true;
+            }
+            
+            continue; // Skip the menu manipulation approach
           }
           // If it's a regular select element
           else if (dropdown.tagName === 'SELECT') {
@@ -500,7 +496,7 @@ body:not([data-theme="dark"]) {
               metaKeys.forEach((item, index) => {
                 const option = document.createElement('option');
                 option.value = item.id || index;
-                option.textContent = item.display_phone_number || item.business_phone_number_id;
+                option.textContent = item.display_phone_number || item.business_phone_number_id || 'WhatsApp Number';
                 option.dataset.phoneNumberId = item.business_phone_number_id;
                 dropdown.appendChild(option);
               });

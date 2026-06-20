@@ -1088,3 +1088,585 @@ body:not([data-theme="dark"]) {
   console.log('✅ Phonebook fix initialized');
 })();
 </script></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div></body></html>
+
+
+<!-- ========================================
+     WHATSAPP FORMS BULK SEND - UI Enhancement
+     ======================================== -->
+<script>
+(function() {
+  'use strict';
+  
+  console.log('📝 WhatsApp Forms Bulk Send Enhancement Loaded');
+  
+  function getJWTToken() {
+    try {
+      const userData = localStorage.getItem('wacrm_user');
+      if (userData) {
+        try {
+          const parsed = JSON.parse(userData);
+          return parsed.token || userData;
+        } catch {
+          return userData;
+        }
+      }
+    } catch (error) {
+      console.error('Error getting token:', error);
+    }
+    return null;
+  }
+  
+  // Monitor for Forms Send dialog
+  function monitorFormsDialog() {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === 1) {
+            // Check if it's the forms send dialog
+            if (node.matches && (
+                node.matches('[role="dialog"]') || 
+                node.matches('.MuiDialog-root')
+            )) {
+              const dialogText = node.textContent || '';
+              if (dialogText.toLowerCase().includes('datepicker') || 
+                  dialogText.toLowerCase().includes('flow id') ||
+                  dialogText.toLowerCase().includes('send now')) {
+                console.log('📝 Forms Send dialog detected');
+                enhanceFormsDialog(node);
+              }
+            }
+          }
+        });
+      });
+    });
+    
+    if (document.body) {
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+    }
+  }
+  
+  function enhanceFormsDialog(dialog) {
+    // Check if we already enhanced this dialog
+    if (dialog.dataset.enhanced === 'true') return;
+    dialog.dataset.enhanced = 'true';
+    
+    console.log('📝 Enhancing Forms dialog...');
+    
+    // Find the "Send Now" button area
+    const buttons = dialog.querySelectorAll('button');
+    let sendButton = null;
+    
+    buttons.forEach(btn => {
+      const text = btn.textContent || '';
+      if (text.toLowerCase().includes('send')) {
+        sendButton = btn;
+      }
+    });
+    
+    if (!sendButton) {
+      console.log('⚠️ Send button not found');
+      return;
+    }
+    
+    // Create a "Bulk Send" button next to the "Send Now" button
+    const bulkSendBtn = document.createElement('button');
+    bulkSendBtn.textContent = '📤 Bulk Send';
+    bulkSendBtn.style.cssText = `
+      margin-left: 8px;
+      padding: 8px 16px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 14px;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px 0 rgba(102, 126, 234, 0.3);
+    `;
+    
+    bulkSendBtn.onmouseenter = function() {
+      this.style.transform = 'translateY(-2px)';
+      this.style.boxShadow = '0 6px 20px 0 rgba(102, 126, 234, 0.4)';
+    };
+    
+    bulkSendBtn.onmouseleave = function() {
+      this.style.transform = 'translateY(0)';
+      this.style.boxShadow = '0 4px 15px 0 rgba(102, 126, 234, 0.3)';
+    };
+    
+    bulkSendBtn.onclick = async function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Get the form ID from the dialog
+      const formIdText = dialog.textContent || '';
+      const formIdMatch = formIdText.match(/Flow ID[:\s]*(\d+)/i);
+      
+      if (!formIdMatch) {
+        console.error('Could not find form ID in dialog');
+        alert('Could not determine form ID');
+        return;
+      }
+      
+      const formId = parseInt(formIdMatch[1]);
+      console.log('📝 Form ID:', formId);
+      
+      // Open bulk send modal
+      openBulkSendModal(formId, dialog);
+    };
+    
+    // Insert the bulk send button
+    if (sendButton.parentElement) {
+      sendButton.parentElement.appendChild(bulkSendBtn);
+      console.log('✅ Bulk Send button added');
+    }
+  }
+  
+  function openBulkSendModal(formId, parentDialog) {
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+      backdrop-filter: blur(4px);
+      animation: fadeIn 0.2s ease;
+    `;
+    
+    const content = document.createElement('div');
+    content.style.cssText = `
+      background: white;
+      border-radius: 16px;
+      padding: 32px;
+      width: 90%;
+      max-width: 600px;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      animation: slideUp 0.3s ease;
+    `;
+    
+    content.innerHTML = `
+      <style>
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes slideUp {
+          from { transform: translateY(30px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        .loader {
+          border: 3px solid #f3f3f3;
+          border-top: 3px solid #667eea;
+          border-radius: 50%;
+          width: 40px;
+          height: 40px;
+          animation: spin 1s linear infinite;
+          margin: 20px auto;
+        }
+      </style>
+      
+      <h2 style="margin: 0 0 24px 0; color: #333; font-size: 24px; font-weight: 600;">
+        📤 Bulk Send WhatsApp Form
+      </h2>
+      
+      <div style="margin-bottom: 24px;">
+        <p style="color: #666; margin: 0 0 16px 0;">Choose how to send this form:</p>
+        
+        <div style="display: flex; gap: 16px; margin-bottom: 24px;">
+          <button id="optionPhonebook" style="
+            flex: 1;
+            padding: 16px;
+            border: 2px solid #667eea;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            color: #667eea;
+            transition: all 0.2s;
+          ">
+            📚 Use Phonebook
+          </button>
+          <button id="optionCustom" style="
+            flex: 1;
+            padding: 16px;
+            border: 2px solid #ddd;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            transition: all 0.2s;
+          ">
+            📝 Custom Numbers
+          </button>
+        </div>
+        
+        <div id="phonebookSection" style="display: block;">
+          <label style="display: block; margin-bottom: 8px; color: #333; font-weight: 600;">
+            Select Phonebook:
+          </label>
+          <select id="phonebookSelect" style="
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+            transition: border-color 0.2s;
+          ">
+            <option value="">Loading phonebooks...</option>
+          </select>
+          <p style="color: #999; font-size: 12px; margin: 8px 0 0 0;">
+            All contacts in the selected phonebook will receive the form
+          </p>
+        </div>
+        
+        <div id="customSection" style="display: none;">
+          <label style="display: block; margin-bottom: 8px; color: #333; font-weight: 600;">
+            Phone Numbers (one per line):
+          </label>
+          <textarea id="phoneNumbersInput" rows="6" placeholder="919876543210&#10;918765432109&#10;917654321098" style="
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: monospace;
+            resize: vertical;
+            transition: border-color 0.2s;
+          "></textarea>
+          <p style="color: #999; font-size: 12px; margin: 8px 0 0 0;">
+            ℹ️ Format: Country code + number (e.g., 919876543210)
+          </p>
+        </div>
+      </div>
+      
+      <div id="progressSection" style="display: none; margin: 24px 0;">
+        <div class="loader"></div>
+        <p id="progressText" style="text-align: center; color: #666; font-weight: 600;">
+          Sending forms...
+        </p>
+      </div>
+      
+      <div id="resultSection" style="display: none; margin: 24px 0;">
+        <div id="resultContent"></div>
+      </div>
+      
+      <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
+        <button id="cancelBtn" style="
+          padding: 12px 24px;
+          border: 2px solid #ddd;
+          background: white;
+          border-radius: 8px;
+          cursor: pointer;
+          font-weight: 600;
+          color: #666;
+          transition: all 0.2s;
+        ">
+          Cancel
+        </button>
+        <button id="sendBulkBtn" style="
+          padding: 12px 24px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          border: none;
+          border-radius: 8px;
+          cursor: pointer;
+          font-weight: 600;
+          transition: all 0.2s;
+          box-shadow: 0 4px 15px 0 rgba(102, 126, 234, 0.3);
+        ">
+          📤 Send to All
+        </button>
+      </div>
+    `;
+    
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+    
+    // Load phonebooks
+    loadPhonebooks();
+    
+    // Toggle between options
+    const optionPhonebook = content.querySelector('#optionPhonebook');
+    const optionCustom = content.querySelector('#optionCustom');
+    const phonebookSection = content.querySelector('#phonebookSection');
+    const customSection = content.querySelector('#customSection');
+    
+    function selectOption(option) {
+      if (option === 'phonebook') {
+        optionPhonebook.style.borderColor = '#667eea';
+        optionPhonebook.style.background = '#f0f4ff';
+        optionPhonebook.style.color = '#667eea';
+        
+        optionCustom.style.borderColor = '#ddd';
+        optionCustom.style.background = 'white';
+        optionCustom.style.color = '#666';
+        
+        phonebookSection.style.display = 'block';
+        customSection.style.display = 'none';
+      } else {
+        optionCustom.style.borderColor = '#667eea';
+        optionCustom.style.background = '#f0f4ff';
+        optionCustom.style.color = '#667eea';
+        
+        optionPhonebook.style.borderColor = '#ddd';
+        optionPhonebook.style.background = 'white';
+        optionPhonebook.style.color = '#666';
+        
+        phonebookSection.style.display = 'none';
+        customSection.style.display = 'block';
+      }
+    }
+    
+    optionPhonebook.onclick = () => selectOption('phonebook');
+    optionCustom.onclick = () => selectOption('custom');
+    
+    // Cancel button
+    content.querySelector('#cancelBtn').onclick = function() {
+      modal.remove();
+    };
+    
+    // Send button
+    content.querySelector('#sendBulkBtn').onclick = async function() {
+      const currentOption = optionPhonebook.style.background.includes('f0f4ff') ? 'phonebook' : 'custom';
+      
+      let phonebookId = null;
+      let phoneNumbers = null;
+      
+      if (currentOption === 'phonebook') {
+        phonebookId = content.querySelector('#phonebookSelect').value;
+        if (!phonebookId) {
+          alert('Please select a phonebook');
+          return;
+        }
+      } else {
+        const input = content.querySelector('#phoneNumbersInput').value;
+        phoneNumbers = input.split('\n').map(n => n.trim()).filter(n => n);
+        if (phoneNumbers.length === 0) {
+          alert('Please enter at least one phone number');
+          return;
+        }
+      }
+      
+      await sendBulkForms(formId, phonebookId, phoneNumbers, content);
+    };
+    
+    // Close on backdrop click
+    modal.onclick = function(e) {
+      if (e.target === modal) {
+        modal.remove();
+      }
+    };
+  }
+  
+  async function loadPhonebooks() {
+    const select = document.querySelector('#phonebookSelect');
+    if (!select) return;
+    
+    const token = getJWTToken();
+    if (!token) {
+      select.innerHTML = '<option value="">Please login</option>';
+      return;
+    }
+    
+    try {
+      const response = await fetch('/api/phonebook/get_all_phonebook', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      const result = await response.json();
+      
+      if (result.success && result.data && result.data.length > 0) {
+        select.innerHTML = '<option value="">-- Select Phonebook --</option>';
+        result.data.forEach(pb => {
+          const option = document.createElement('option');
+          option.value = pb.id;
+          option.textContent = `${pb.name} (${pb.contact_count || 0} contacts)`;
+          select.appendChild(option);
+        });
+      } else {
+        select.innerHTML = '<option value="">No phonebooks found</option>';
+      }
+    } catch (error) {
+      console.error('Error loading phonebooks:', error);
+      select.innerHTML = '<option value="">Error loading phonebooks</option>';
+    }
+  }
+  
+  async function sendBulkForms(formId, phonebookId, phoneNumbers, contentEl) {
+    const sendBtn = contentEl.querySelector('#sendBulkBtn');
+    const cancelBtn = contentEl.querySelector('#cancelBtn');
+    const progressSection = contentEl.querySelector('#progressSection');
+    const resultSection = contentEl.querySelector('#resultSection');
+    const progressText = contentEl.querySelector('#progressText');
+    
+    // Disable buttons and show progress
+    sendBtn.disabled = true;
+    cancelBtn.disabled = true;
+    sendBtn.style.opacity = '0.5';
+    cancelBtn.style.opacity = '0.5';
+    progressSection.style.display = 'block';
+    resultSection.style.display = 'none';
+    
+    const token = getJWTToken();
+    if (!token) {
+      alert('Please login first');
+      return;
+    }
+    
+    try {
+      const payload = { id: formId };
+      if (phonebookId) {
+        payload.phonebookId = parseInt(phonebookId);
+        progressText.textContent = 'Sending forms to phonebook...';
+      } else {
+        payload.phoneNumbers = phoneNumbers;
+        progressText.textContent = `Sending forms to ${phoneNumbers.length} numbers...`;
+      }
+      
+      console.log('📤 Sending bulk forms:', payload);
+      
+      const response = await fetch('/api/waform/send-form-bulk', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      const result = await response.json();
+      console.log('📊 Result:', result);
+      
+      // Hide progress
+      progressSection.style.display = 'none';
+      
+      // Show results
+      resultSection.style.display = 'block';
+      const resultContent = contentEl.querySelector('#resultContent');
+      
+      if (result.success) {
+        const successRate = ((result.results.success / result.results.total) * 100).toFixed(1);
+        
+        resultContent.innerHTML = `
+          <div style="padding: 20px; background: #f0fdf4; border: 2px solid #86efac; border-radius: 8px;">
+            <h3 style="margin: 0 0 16px 0; color: #166534; font-size: 18px;">
+              ✅ Bulk Send Complete!
+            </h3>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 16px;">
+              <div style="padding: 12px; background: white; border-radius: 6px;">
+                <div style="color: #999; font-size: 12px;">Total</div>
+                <div style="color: #333; font-size: 24px; font-weight: 700;">${result.results.total}</div>
+              </div>
+              <div style="padding: 12px; background: white; border-radius: 6px;">
+                <div style="color: #999; font-size: 12px;">Success</div>
+                <div style="color: #22c55e; font-size: 24px; font-weight: 700;">${result.results.success}</div>
+              </div>
+              <div style="padding: 12px; background: white; border-radius: 6px;">
+                <div style="color: #999; font-size: 12px;">Failed</div>
+                <div style="color: #ef4444; font-size: 24px; font-weight: 700;">${result.results.failed}</div>
+              </div>
+              <div style="padding: 12px; background: white; border-radius: 6px;">
+                <div style="color: #999; font-size: 12px;">Success Rate</div>
+                <div style="color: #333; font-size: 24px; font-weight: 700;">${successRate}%</div>
+              </div>
+            </div>
+            ${result.results.errors && result.results.errors.length > 0 ? `
+              <details style="margin-top: 16px;">
+                <summary style="cursor: pointer; color: #ef4444; font-weight: 600;">
+                  View Errors (${result.results.errors.length})
+                </summary>
+                <div style="margin-top: 12px; max-height: 200px; overflow-y: auto;">
+                  ${result.results.errors.map(err => `
+                    <div style="padding: 8px; background: #fef2f2; border-left: 3px solid #ef4444; margin-bottom: 8px; font-size: 13px;">
+                      <strong>${err.phone}</strong>${err.name ? ` (${err.name})` : ''}<br>
+                      <span style="color: #666;">${err.error}</span>
+                    </div>
+                  `).join('')}
+                </div>
+              </details>
+            ` : ''}
+          </div>
+        `;
+        
+        // Enable close button
+        cancelBtn.disabled = false;
+        cancelBtn.style.opacity = '1';
+        cancelBtn.textContent = 'Close';
+        sendBtn.style.display = 'none';
+        
+      } else {
+        resultContent.innerHTML = `
+          <div style="padding: 20px; background: #fef2f2; border: 2px solid #fca5a5; border-radius: 8px;">
+            <h3 style="margin: 0 0 12px 0; color: #991b1b; font-size: 18px;">
+              ❌ Error
+            </h3>
+            <p style="margin: 0; color: #666;">
+              ${result.msg || 'Failed to send forms'}
+            </p>
+          </div>
+        `;
+        
+        // Re-enable buttons
+        sendBtn.disabled = false;
+        cancelBtn.disabled = false;
+        sendBtn.style.opacity = '1';
+        cancelBtn.style.opacity = '1';
+      }
+      
+    } catch (error) {
+      console.error('Error sending bulk forms:', error);
+      
+      progressSection.style.display = 'none';
+      resultSection.style.display = 'block';
+      
+      contentEl.querySelector('#resultContent').innerHTML = `
+        <div style="padding: 20px; background: #fef2f2; border: 2px solid #fca5a5; border-radius: 8px;">
+          <h3 style="margin: 0 0 12px 0; color: #991b1b; font-size: 18px;">
+            ❌ Error
+          </h3>
+          <p style="margin: 0; color: #666;">
+            ${error.message}
+          </p>
+        </div>
+      `;
+      
+      // Re-enable buttons
+      sendBtn.disabled = false;
+      cancelBtn.disabled = false;
+      sendBtn.style.opacity = '1';
+      cancelBtn.style.opacity = '1';
+    }
+  }
+  
+  // Start monitoring
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', monitorFormsDialog);
+  } else {
+    monitorFormsDialog();
+  }
+  
+  console.log('✅ WhatsApp Forms Bulk Send ready');
+})();
+</script>

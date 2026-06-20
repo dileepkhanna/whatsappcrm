@@ -365,10 +365,12 @@ body:not([data-theme="dark"]) {
 
 <script defer="defer" src="/static/js/main.dca03fbf.js"></script><link href="/static/css/main.e546b2bd.css" rel="stylesheet">
 
-<!-- FIX: Populate "From" dropdown in Start New Conversation -->
+<!-- FIX: Populate "From" dropdown in Start New Conversation with PHONE NUMBER (not ID) -->
 <script>
 (function() {
-  console.log('🔧 Initializing "Start New Conversation" dropdown fix...');
+  console.log('🔧 Initializing "Start New Conversation" dropdown fix (PHONE NUMBER display)...');
+  
+  let metaKeysCache = null; // Cache the API response
   
   // Function to fetch and populate Meta API phone numbers
   async function populateFromDropdown() {
@@ -382,7 +384,6 @@ body:not([data-theme="dark"]) {
       }
       
       // If it's a JSON object, extract the token
-      // Otherwise, use it directly (it's the JWT token itself)
       try {
         const userData = JSON.parse(token);
         if (userData.token) {
@@ -393,115 +394,138 @@ body:not([data-theme="dark"]) {
         console.log('✅ Using token directly from localStorage');
       }
       
-      // Fetch Meta API keys
-      const response = await fetch('/api/user/get_meta_keys', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+      // Fetch Meta API keys (use cache if available)
+      if (!metaKeysCache) {
+        const response = await fetch('/api/user/get_meta_keys', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (!response.ok) {
+          console.error('❌ Failed to fetch meta keys');
+          return;
         }
-      });
-      
-      if (!response.ok) {
-        return;
+        
+        const data = await response.json();
+        
+        if (!data.success || !data.data) {
+          console.error('❌ Invalid meta keys response');
+          return;
+        }
+        
+        metaKeysCache = Array.isArray(data.data) ? data.data : [data.data];
+        console.log('✅ Meta keys loaded:', metaKeysCache);
       }
       
-      const data = await response.json();
-      
-      if (!data.success || !data.data) {
-        return;
-      }
-      
-      // Find the "From" dropdown/select element
-      // Try multiple possible selectors
+      // Find all dropdowns in the Start New Conversation dialog
       const selectors = [
-        'select[name="from"]',
-        'select[name="From"]',
-        'select[id*="from" i]',
-        'div[class*="MuiSelect"]',
-        'input[placeholder*="from" i]',
-        'select'
+        'select',
+        'div[role="combobox"]',
+        'input[type="hidden"]'
       ];
-      
-      // Convert data.data to array if it's an object
-      const metaKeys = Array.isArray(data.data) ? data.data : [data.data];
       
       let foundDropdown = false;
       
       for (const selector of selectors) {
-        const dropdowns = document.querySelectorAll(selector);
+        const elements = document.querySelectorAll(selector);
         
-        for (const dropdown of dropdowns) {
-          // Check if this is inside a dialog/modal for "Start New Conversation"
-          const dialog = dropdown.closest('[role="dialog"], .MuiDialog-root, [class*="modal"], [class*="Modal"]');
+        for (const element of elements) {
+          // Check if this is inside the Start New Conversation dialog
+          const dialog = element.closest('[role="dialog"], .MuiDialog-root, [class*="modal"], [class*="Modal"]');
           
           if (!dialog) continue;
           
-          // Check if dialog contains text related to starting conversation
+          // Check if dialog contains "From" label or "Start New Conversation"
           const dialogText = dialog.textContent || '';
-          if (!dialogText.toLowerCase().includes('conversation') && 
-              !dialogText.toLowerCase().includes('from')) {
-            continue;
+          const hasConversation = dialogText.toLowerCase().includes('conversation');
+          const hasFrom = dialogText.toLowerCase().includes('from');
+          
+          if (!hasConversation && !hasFrom) continue;
+          
+          console.log('📝 Found dialog with conversation/from:', element.tagName);
+          
+          // Handle regular SELECT element
+          if (element.tagName === 'SELECT') {
+            console.log('📝 Populating SELECT element');
+            
+            // Clear existing options
+            element.innerHTML = '';
+            
+            // Add a default option
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = '-- Select WhatsApp Number --';
+            element.appendChild(defaultOption);
+            
+            // Add options for each Meta API key
+            metaKeysCache.forEach((item) => {
+              const option = document.createElement('option');
+              
+              // VALUE should be the business_phone_number_id (for API calls)
+              option.value = item.business_phone_number_id;
+              
+              // TEXT should be the display_phone_number (what user sees)
+              option.textContent = item.display_phone_number || `+${item.business_phone_number_id}`;
+              
+              // Store both values in dataset for later use
+              option.dataset.phoneNumberId = item.business_phone_number_id;
+              option.dataset.displayNumber = item.display_phone_number;
+              
+              element.appendChild(option);
+              
+              console.log('✅ Added option:', option.textContent, '(ID:', option.value, ')');
+            });
+            
+            // Don't auto-select - let user choose
+            element.selectedIndex = 0; // Select the default "-- Select --" option
+            
+            foundDropdown = true;
           }
           
-          // If it's a Material-UI Select, we need to handle it differently
-          if (dropdown.classList.contains('MuiSelect-root') || 
-              dropdown.closest('.MuiSelect-root')) {
+          // Handle Material-UI combobox (display text)
+          else if (element.getAttribute('role') === 'combobox') {
+            console.log('📝 Found MUI combobox, updating display text');
             
-            // Find the actual select element (might be hidden input)
-            const selectRoot = dropdown.closest('.MuiSelect-root') || dropdown;
-            const hiddenInput = selectRoot.querySelector('input[type="hidden"]');
-            const displayDiv = selectRoot.querySelector('[role="combobox"]');
+            // Find the parent MuiSelect container
+            const selectRoot = element.closest('[class*="MuiSelect"], [class*="MuiInput"]');
+            if (!selectRoot) continue;
             
-            if (displayDiv) {
-              // Set display text
-              const displayText = metaKeys[0].display_phone_number || 
-                                  metaKeys[0].business_phone_number_id || 
-                                  'WhatsApp Number';
-              displayDiv.textContent = displayText;
-              displayDiv.setAttribute('aria-label', displayText);
-              
-              // Set hidden value if input exists
-              if (hiddenInput) {
-                hiddenInput.value = metaKeys[0].business_phone_number_id;
-              }
-              
-              // Store in dataset
-              selectRoot.dataset.selectedValue = metaKeys[0].business_phone_number_id;
-              selectRoot.dataset.phoneNumber = metaKeys[0].display_phone_number;
-              selectRoot.dataset.phoneNumberId = metaKeys[0].business_phone_number_id;
-              
-              foundDropdown = true;
+            // Don't set text immediately - leave it empty for user to select
+            element.textContent = ''; // Clear the displayed ID
+            element.setAttribute('aria-label', 'Select WhatsApp Number');
+            
+            // Try to find and populate the actual hidden select/input
+            const hiddenInput = selectRoot.querySelector('input[type="hidden"], input[name="from"], input[name="From"]');
+            if (hiddenInput) {
+              hiddenInput.value = ''; // Clear auto-selected value
+              console.log('✅ Cleared hidden input value');
             }
             
-            continue; // Skip the menu manipulation approach
+            foundDropdown = true;
           }
-          // If it's a regular select element
-          else if (dropdown.tagName === 'SELECT') {
-            if (dropdown.options.length <= 1) {
-              
-              // Clear existing options
-              dropdown.innerHTML = '<option value="">Select Phone Number</option>';
-              
-              // Convert data.data to array if it's an object
-              const metaKeys = Array.isArray(data.data) ? data.data : [data.data];
-              
-              // Add options from API data
-              metaKeys.forEach((item, index) => {
-                const option = document.createElement('option');
-                option.value = item.id || index;
-                option.textContent = item.display_phone_number || item.business_phone_number_id || 'WhatsApp Number';
-                option.dataset.phoneNumberId = item.business_phone_number_id;
-                dropdown.appendChild(option);
-              });
-              
+          
+          // Handle hidden input
+          else if (element.type === 'hidden') {
+            const name = element.name || '';
+            if (name.toLowerCase() === 'from') {
+              console.log('📝 Found hidden FROM input, clearing value');
+              element.value = ''; // Clear auto-selected value
               foundDropdown = true;
             }
           }
         }
       }
       
+      if (foundDropdown) {
+        console.log('✅ Successfully configured "From" dropdown - user can now select');
+      } else {
+        console.log('⚠️ No dropdown found in dialog');
+      }
+      
     } catch (error) {
-      // Silent error - don't log
+      console.error('❌ Error in populateFromDropdown:', error);
     }
   }
   
@@ -513,11 +537,11 @@ body:not([data-theme="dark"]) {
   
   // Monitor for dialog/modal opening
   const observer = new MutationObserver((mutations) => {
-    if (!isInboxPage()) return; // Skip if not on inbox page
+    if (!isInboxPage()) return;
     
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
-        if (node.nodeType === 1) { // Element node
+        if (node.nodeType === 1) {
           // Check if it's a dialog/modal
           if (node.matches && (
               node.matches('[role="dialog"]') || 
@@ -527,9 +551,10 @@ body:not([data-theme="dark"]) {
           )) {
             const text = node.textContent || '';
             if (text.toLowerCase().includes('conversation') || text.toLowerCase().includes('from')) {
-              setTimeout(populateFromDropdown, 500);
-              setTimeout(populateFromDropdown, 1000);
-              setTimeout(populateFromDropdown, 2000);
+              console.log('🎯 Start New Conversation dialog opened!');
+              setTimeout(populateFromDropdown, 300);
+              setTimeout(populateFromDropdown, 800);
+              setTimeout(populateFromDropdown, 1500);
             }
           }
         }
@@ -540,7 +565,6 @@ body:not([data-theme="dark"]) {
   // Start observing when body is ready AND on inbox page
   const startObserving = () => {
     if (!isInboxPage()) {
-      // Don't log anything if not on inbox page
       return;
     }
     
@@ -549,6 +573,7 @@ body:not([data-theme="dark"]) {
         childList: true,
         subtree: true
       });
+      console.log('👀 Monitoring for Start New Conversation dialog...');
     }
   };
   
@@ -558,7 +583,7 @@ body:not([data-theme="dark"]) {
     startObserving();
   }
   
-  // Also try to populate on any button click that might open the dialog (ONLY on inbox page)
+  // Also try to populate on any button click that might open the dialog
   document.addEventListener('click', (e) => {
     if (!isInboxPage()) return;
     
@@ -566,9 +591,11 @@ body:not([data-theme="dark"]) {
     const text = target.textContent || '';
     
     if (text.toLowerCase().includes('conversation') || 
-        text.toLowerCase().includes('new message')) {
-      setTimeout(populateFromDropdown, 500);
-      setTimeout(populateFromDropdown, 1000);
+        text.toLowerCase().includes('start new') ||
+        text.toLowerCase().includes('new chat')) {
+      console.log('🖱️ Conversation button clicked!');
+      setTimeout(populateFromDropdown, 300);
+      setTimeout(populateFromDropdown, 800);
     }
   }, true);
   
@@ -583,6 +610,8 @@ body:not([data-theme="dark"]) {
       }
     }
   }).observe(document, {subtree: true, childList: true});
+  
+  console.log('✅ Start New Conversation fix ready!');
 })();
 </script>
 

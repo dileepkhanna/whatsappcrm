@@ -67,7 +67,7 @@ async function runTest() {
     
     // Step 3: Get phonebooks (optional)
     console.log('📚 Step 3: Checking phonebooks...');
-    const phonebooksRes = await fetch(`${BASE_URL}/api/phonebook/get_all_phonebook`, {
+    const phonebooksRes = await fetch(`${BASE_URL}/api/phonebook/get_by_uid`, {
       headers: { 'Authorization': `Bearer ${authToken}` }
     });
     
@@ -75,7 +75,7 @@ async function runTest() {
     if (phonebooksData.success && phonebooksData.data && phonebooksData.data.length > 0) {
       console.log(`✅ Found ${phonebooksData.data.length} phonebook(s)`);
       phonebooksData.data.forEach((pb, i) => {
-        console.log(`   ${i+1}. ${pb.name} (ID: ${pb.id})`);
+        console.log(`   ${i+1}. ${pb.name} (ID: ${pb.id}, Contacts: ${pb.contactCount || 0})`);
       });
     } else {
       console.log('⚠️  No phonebooks found');
@@ -159,7 +159,7 @@ async function testWithPhonebook() {
     
     // Step 2: Get phonebooks
     console.log('📚 Fetching phonebooks...');
-    const phonebooksRes = await fetch(`${BASE_URL}/api/phonebook/get_all_phonebook`, {
+    const phonebooksRes = await fetch(`${BASE_URL}/api/phonebook/get_by_uid`, {
       headers: { 'Authorization': `Bearer ${authToken}` }
     });
     
@@ -170,7 +170,7 @@ async function testWithPhonebook() {
     }
     
     const testPhonebook = phonebooksData.data[0];
-    console.log(`✅ Using phonebook: "${testPhonebook.name}" (ID: ${testPhonebook.id})\n`);
+    console.log(`✅ Using phonebook: "${testPhonebook.name}" (ID: ${testPhonebook.id}, Contacts: ${testPhonebook.contactCount || 0})\n`);
     
     // Step 3: Get forms
     const formsRes = await fetch(`${BASE_URL}/api/waform/get-forms`, {

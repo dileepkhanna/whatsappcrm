@@ -1202,18 +1202,60 @@ body:not([data-theme="dark"]) {
       e.preventDefault();
       e.stopPropagation();
       
-      // Get the form ID from the dialog
-      const formIdText = dialog.textContent || '';
-      const formIdMatch = formIdText.match(/Flow ID[:\s]*(\d+)/i);
+      // Try multiple methods to get the form ID
+      let formId = null;
       
-      if (!formIdMatch) {
-        console.error('Could not find form ID in dialog');
-        alert('Could not determine form ID');
+      // Method 1: Look for "Flow ID: xxxxx" text
+      const formIdText = dialog.textContent || '';
+      const flowIdMatch = formIdText.match(/Flow ID[:\s]*(\d+)/i);
+      if (flowIdMatch) {
+        formId = parseInt(flowIdMatch[1]);
+        console.log('📝 Found Form ID from "Flow ID" text:', formId);
+      }
+      
+      // Method 2: Look for form name in the dialog and find its ID from the page
+      if (!formId) {
+        // Get the form name from dialog title
+        const titleElement = dialog.querySelector('h2, [class*="title"], [class*="Title"]');
+        if (titleElement) {
+          const formName = titleElement.textContent || '';
+          console.log('📝 Form name from dialog:', formName);
+          
+          // Try to find the form ID from the forms page data
+          // This would work if we're on the forms page
+          const formCards = document.querySelectorAll('[data-form-id]');
+          for (const card of formCards) {
+            const cardText = card.textContent || '';
+            if (cardText.includes(formName)) {
+              formId = parseInt(card.dataset.formId);
+              console.log('📝 Found Form ID from card:', formId);
+              break;
+            }
+          }
+        }
+      }
+      
+      // Method 3: Look for any number that might be the form ID
+      if (!formId) {
+        const numberMatch = formIdText.match(/\b(\d{13,20})\b/); // Meta form IDs are typically 16 digits
+        if (numberMatch) {
+          formId = parseInt(numberMatch[1]);
+          console.log('📝 Found Form ID from number pattern:', formId);
+        }
+      }
+      
+      // Method 4: Try to get from the URL or React state (last resort)
+      if (!formId) {
+        console.log('📝 Dialog content:', formIdText.substring(0, 200));
+      }
+      
+      if (!formId) {
+        console.error('❌ Could not find form ID in dialog');
+        alert('Could not determine form ID. Please try clicking Send on a specific form first.');
         return;
       }
       
-      const formId = parseInt(formIdMatch[1]);
-      console.log('📝 Form ID:', formId);
+      console.log('✅ Using Form ID:', formId);
       
       // Open bulk send modal
       openBulkSendModal(formId, dialog);
@@ -1254,6 +1296,9 @@ body:not([data-theme="dark"]) {
       overflow-y: auto;
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
       animation: slideUp 0.3s ease;
+      pointer-events: auto;
+      position: relative;
+      z-index: 10001;
     `;
     
     content.innerHTML = `
@@ -1343,16 +1388,30 @@ body:not([data-theme="dark"]) {
           <label style="display: block; margin-bottom: 8px; color: #333; font-weight: 600;">
             Phone Numbers (one per line):
           </label>
-          <textarea id="phoneNumbersInput" rows="6" placeholder="919876543210&#10;918765432109&#10;917654321098" style="
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            font-size: 14px;
-            font-family: monospace;
-            resize: vertical;
-            transition: border-color 0.2s;
-          "></textarea>
+          <textarea 
+            id="phoneNumbersInput" 
+            rows="6" 
+            placeholder="919876543210&#10;918765432109&#10;917654321098" 
+            spellcheck="false"
+            autocomplete="off"
+            style="
+              width: 100%;
+              padding: 12px;
+              border: 2px solid #ddd;
+              border-radius: 8px;
+              font-size: 14px;
+              font-family: monospace;
+              resize: vertical;
+              transition: border-color 0.2s;
+              pointer-events: auto;
+              user-select: text;
+              -webkit-user-select: text;
+              -moz-user-select: text;
+              -ms-user-select: text;
+            "
+            onfocus="this.style.borderColor='#667eea'"
+            onblur="this.style.borderColor='#ddd'"
+          ></textarea>
           <p style="color: #999; font-size: 12px; margin: 8px 0 0 0;">
             ℹ️ Format: Country code + number (e.g., 919876543210)
           </p>
@@ -1411,7 +1470,12 @@ body:not([data-theme="dark"]) {
     const phonebookSection = content.querySelector('#phonebookSection');
     const customSection = content.querySelector('#customSection');
     
+    // Store selected option in a variable for reliable checking
+    let selectedOption = 'phonebook'; // Default to phonebook
+    
     function selectOption(option) {
+      selectedOption = option; // Store the selected option
+      
       if (option === 'phonebook') {
         optionPhonebook.style.borderColor = '#667eea';
         optionPhonebook.style.background = '#f0f4ff';
@@ -1440,6 +1504,9 @@ body:not([data-theme="dark"]) {
     optionPhonebook.onclick = () => selectOption('phonebook');
     optionCustom.onclick = () => selectOption('custom');
     
+    // Initialize with phonebook option selected
+    selectOption('phonebook');
+    
     // Cancel button
     content.querySelector('#cancelBtn').onclick = function() {
       modal.remove();
@@ -1447,7 +1514,8 @@ body:not([data-theme="dark"]) {
     
     // Send button
     content.querySelector('#sendBulkBtn').onclick = async function() {
-      const currentOption = optionPhonebook.style.background.includes('f0f4ff') ? 'phonebook' : 'custom';
+      // Use the stored variable instead of checking styles
+      const currentOption = selectedOption;
       
       let phonebookId = null;
       let phoneNumbers = null;
@@ -1470,11 +1538,16 @@ body:not([data-theme="dark"]) {
       await sendBulkForms(formId, phonebookId, phoneNumbers, content);
     };
     
-    // Close on backdrop click
+    // Close on backdrop click (but not when clicking content)
     modal.onclick = function(e) {
       if (e.target === modal) {
         modal.remove();
       }
+    };
+    
+    // Prevent clicks on content from closing modal
+    content.onclick = function(e) {
+      e.stopPropagation();
     };
   }
   
@@ -1489,7 +1562,7 @@ body:not([data-theme="dark"]) {
     }
     
     try {
-      const response = await fetch('/api/phonebook/get_all_phonebook', {
+      const response = await fetch('/api/phonebook/get_by_uid', {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -1502,7 +1575,7 @@ body:not([data-theme="dark"]) {
         result.data.forEach(pb => {
           const option = document.createElement('option');
           option.value = pb.id;
-          option.textContent = `${pb.name} (${pb.contact_count || 0} contacts)`;
+          option.textContent = `${pb.name} (${pb.contactCount || 0} contacts)`;
           select.appendChild(option);
         });
       } else {

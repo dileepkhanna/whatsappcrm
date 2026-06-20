@@ -1545,10 +1545,56 @@ body:not([data-theme="dark"]) {
       }
     };
     
-    // Prevent clicks on content from closing modal
+    // Prevent clicks on content from closing modal (but allow text selection)
     content.onclick = function(e) {
       e.stopPropagation();
     };
+    
+    // CRITICAL FIX: Make textarea fully editable and functional
+    const textarea = content.querySelector('#phoneNumbersInput');
+    if (textarea) {
+      // Remove any event blocking
+      textarea.style.pointerEvents = 'auto';
+      textarea.style.userSelect = 'text';
+      textarea.style.webkitUserSelect = 'text';
+      textarea.readOnly = false;
+      textarea.disabled = false;
+      
+      // Force focus capability
+      textarea.addEventListener('mousedown', function(e) {
+        e.stopPropagation(); // Prevent parent handlers from interfering
+      }, true);
+      
+      textarea.addEventListener('click', function(e) {
+        e.stopPropagation();
+        this.focus(); // Ensure focus on click
+      }, true);
+      
+      textarea.addEventListener('focus', function() {
+        this.style.borderColor = '#667eea';
+        this.style.outline = '2px solid #667eea';
+        console.log('✅ Textarea focused and ready for input');
+      });
+      
+      textarea.addEventListener('blur', function() {
+        this.style.borderColor = '#ddd';
+        this.style.outline = 'none';
+      });
+      
+      textarea.addEventListener('input', function() {
+        console.log('📝 Textarea content:', this.value);
+      });
+      
+      // Auto-focus when custom tab is selected
+      optionCustom.addEventListener('click', function() {
+        setTimeout(() => {
+          if (textarea && customSection.style.display !== 'none') {
+            textarea.focus();
+            console.log('✅ Auto-focused textarea after tab switch');
+          }
+        }, 100);
+      });
+    }
   }
   
   async function loadPhonebooks() {

@@ -92,12 +92,12 @@ app.get("*", function (request, response) {
 const server = app.listen(process.env.PORT || 3010, () => {
   console.log(`WaCrm server is running on port ${process.env.PORT}`);
   updateLangJsonFromEnglish();
-  // init();
-  // setTimeout(() => {
-  //   warmerLoopInit();
-  //   initCampaign();
-  //   initTele();
-  // }, 1000);
+  // init(); // QR code initialization - uncomment if using QR mode
+  setTimeout(() => {
+    // warmerLoopInit(); // Uncomment if using phone number warmer
+    initCampaign(); // ✅ ENABLED - Process campaigns
+    // initTele(); // Uncomment if using Telegram
+  }, 1000);
 });
 
 // ─── Socket.IO ────────────────────────────────────────────────────────────────

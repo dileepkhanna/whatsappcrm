@@ -224,9 +224,11 @@
     <p class="subtitle">Send forms to multiple contacts at once</p>
     
     <div class="form-group">
-      <label for="formId">Form ID *</label>
-      <input type="number" id="formId" placeholder="Enter form ID (e.g., 1)" required>
-      <p class="hint">Get the form ID from the forms page</p>
+      <label for="formSelect">Select Form *</label>
+      <select id="formSelect">
+        <option value="">Loading forms...</option>
+      </select>
+      <p class="hint">Choose the form you want to send</p>
     </div>
     
     <div class="tabs">
@@ -340,9 +342,43 @@
       }
     }
     
+    // Load forms
+    async function loadForms() {
+      const select = document.getElementById('formSelect');
+      token = getToken();
+      
+      if (!token) {
+        select.innerHTML = '<option value="">Please login first</option>';
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/waform/get-forms', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.data && result.data.length > 0) {
+          select.innerHTML = '<option value="">-- Select Form --</option>';
+          result.data.forEach(form => {
+            const option = document.createElement('option');
+            option.value = form.id;
+            option.textContent = `${form.name} (${form.flow_status || 'DRAFT'})`;
+            select.appendChild(option);
+          });
+        } else {
+          select.innerHTML = '<option value="">No forms found</option>';
+        }
+      } catch (error) {
+        console.error('Error loading forms:', error);
+        select.innerHTML = '<option value="">Error loading forms</option>';
+      }
+    }
+    
     // Send bulk forms
     async function sendBulk() {
-      const formId = document.getElementById('formId').value;
+      const formId = document.getElementById('formSelect').value;
       const sendBtn = document.getElementById('sendBtn');
       const progress = document.getElementById('progress');
       const progressText = document.getElementById('progressText');
@@ -350,7 +386,7 @@
       
       // Validate form ID
       if (!formId) {
-        alert('Please enter a form ID');
+        alert('Please select a form');
         return;
       }
       
@@ -484,6 +520,7 @@
     
     // Initialize
     loadPhonebooks();
+    loadForms();
   </script>
 </body>
 </html>

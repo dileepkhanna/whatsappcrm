@@ -431,7 +431,7 @@ router.post(
   },
 );
 
-// ─── SEND FORM ────────────────────────────────────────────────────────────────
+// ─── SEND FORM (Single) ───────────────────────────────────────────────────────
 router.post(
   "/send-form",
   validateUser,
@@ -498,6 +498,137 @@ router.post(
       });
     }
   },
+);
+
+// ─── SEND FORM (Bulk to Multiple Numbers) ────────────────────────────────────
+router.post(
+  "/send-form-bulk",
+  validateUser,
+  checkPlan,
+  checkWaForms,
+  async (req, res) => {
+    try {
+      const { id, phonebookId, phoneNumbers } = req.body;
+      
+      // Get contacts from phonebook OR use provided phone numbers
+      let contacts = [];
+      
+      if (phonebookId) {
+        // Option A: Get contacts from phonebook
+        contacts = await query(
+          `SELECT name, mobile FROM contact WHERE phonebook_id = ? AND uid = ?`,
+          [phonebookId, req.decode.uid]
+        );
+      } else if (phoneNumbers && Array.isArray(phoneNumbers)) {
+        // Option B: Use provided phone numbers
+        contacts = phoneNumbers.map(phone => ({ 
+          mobile: phone.toString().trim(), 
+          name: '' 
+        }));
+      } else {
+        return res.json({ 
+          success: false, 
+          msg: "Please provide phonebookId or phoneNumbers array" 
+        });
+      }
+      
+      if (contacts.length === 0) {
+        return res.json({ success: false, msg: "No contacts found" });
+      }
+      
+      const metaApi = await getMetaConfig(req.decode.uid);
+      if (!metaApi)
+        return res.json({ success: false, msg: "Meta API not configured" });
+
+      const [form] = await query(
+        `SELECT * FROM wa_forms WHERE id = ? AND uid = ?`,
+        [id, req.decode.uid]
+      );
+      if (!form) return res.json({ success: false, msg: "Form not found" });
+
+      // Send to all contacts with rate limiting
+      const results = { 
+        success: 0, 
+        failed: 0, 
+        total: contacts.length,
+        errors: [] 
+      };
+      
+      for (let i = 0; i < contacts.length; i++) {
+        const contact = contacts[i];
+        try {
+          const response = await axios.post(
+            `https://graph.facebook.com/${API_VERSION}/${metaApi.business_phone_number_id}/messages`,
+            {
+              messaging_product: "whatsapp",
+              recipient_type: "individual",
+              to: contact.mobile,
+              type: "interactive",
+              interactive: {
+                type: "flow",
+                header: { type: "text", text: form.name },
+                body: {
+                  text: form.description || "Please fill out the form below."
+                },
+                footer: { text: "Powered by WhatsApp Flows" },
+                action: {
+                  name: "flow",
+                  parameters: {
+                    flow_message_version: "3",
+                    flow_token: `TOKEN_${Date.now()}_${i}`,
+                    flow_id: form.flow_id,
+                    flow_cta: "Open Form",
+                    flow_action: "navigate",
+                    flow_action_payload: { screen: "FORM_SCREEN" }
+                  }
+                }
+              }
+            },
+            {
+              headers: {
+                Authorization: `Bearer ${metaApi.access_token}`,
+                "Content-Type": "application/json"
+              }
+            }
+          );
+          
+          results.success++;
+          console.log(`✅ Form sent to ${contact.mobile} (${i+1}/${contacts.length})`);
+          
+          // Wait 1 second between messages (rate limiting)
+          if (i < contacts.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+          
+        } catch (err) {
+          results.failed++;
+          const errorMsg = err.response?.data?.error?.message || err.message;
+          results.errors.push({
+            phone: contact.mobile,
+            name: contact.name,
+            error: errorMsg
+          });
+          console.error(`❌ Failed to send to ${contact.mobile}: ${errorMsg}`);
+        }
+      }
+
+      const successRate = ((results.success / results.total) * 100).toFixed(1);
+
+      res.json({
+        success: true,
+        msg: `Form sent to ${results.success}/${results.total} contacts (${successRate}% success rate). ${results.failed} failed.`,
+        results
+      });
+      
+    } catch (err) {
+      console.error(err);
+      res.json({
+        success: false,
+        msg: err.response?.data?.error?.message || "Something went wrong",
+        error: err.message
+      });
+    }
+  }
 );
 
 // ─── DELETE FORM ──────────────────────────────────────────────────────────────

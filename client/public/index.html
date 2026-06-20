@@ -402,15 +402,12 @@ body:not([data-theme="dark"]) {
       });
       
       if (!response.ok) {
-        console.log('⚠️ Failed to fetch meta keys:', response.status);
         return;
       }
       
       const data = await response.json();
-      console.log('✅ Fetched meta keys:', data);
       
       if (!data.success || !data.data) {
-        console.log('⚠️ No Meta API keys found');
         return;
       }
       
@@ -427,7 +424,6 @@ body:not([data-theme="dark"]) {
       
       // Convert data.data to array if it's an object
       const metaKeys = Array.isArray(data.data) ? data.data : [data.data];
-      console.log('📋 Meta keys array:', metaKeys);
       
       let foundDropdown = false;
       
@@ -447,13 +443,9 @@ body:not([data-theme="dark"]) {
             continue;
           }
           
-          console.log('📍 Found potential "From" dropdown:', dropdown);
-          
           // If it's a Material-UI Select, we need to handle it differently
           if (dropdown.classList.contains('MuiSelect-root') || 
               dropdown.closest('.MuiSelect-root')) {
-            
-            console.log('📝 Populating Material-UI Select directly...');
             
             // Find the actual select element (might be hidden input)
             const selectRoot = dropdown.closest('.MuiSelect-root') || dropdown;
@@ -478,7 +470,6 @@ body:not([data-theme="dark"]) {
               selectRoot.dataset.phoneNumber = metaKeys[0].display_phone_number;
               selectRoot.dataset.phoneNumberId = metaKeys[0].business_phone_number_id;
               
-              console.log('✅ Set dropdown value:', displayText);
               foundDropdown = true;
             }
             
@@ -487,14 +478,12 @@ body:not([data-theme="dark"]) {
           // If it's a regular select element
           else if (dropdown.tagName === 'SELECT') {
             if (dropdown.options.length <= 1) {
-              console.log('📝 Populating regular select dropdown...');
               
               // Clear existing options
               dropdown.innerHTML = '<option value="">Select Phone Number</option>';
               
               // Convert data.data to array if it's an object
               const metaKeys = Array.isArray(data.data) ? data.data : [data.data];
-              console.log('📋 Meta keys array:', metaKeys);
               
               // Add options from API data
               metaKeys.forEach((item, index) => {
@@ -506,23 +495,26 @@ body:not([data-theme="dark"]) {
               });
               
               foundDropdown = true;
-              console.log(`✅ Added ${data.data.length} phone numbers to dropdown`);
             }
           }
         }
       }
       
-      if (!foundDropdown) {
-        console.log('⚠️ Could not find "From" dropdown to populate');
-      }
-      
     } catch (error) {
-      console.error('❌ Error populating dropdown:', error);
+      // Silent error - don't log
     }
+  }
+  
+  // ✅ ONLY run this fix on the inbox page
+  function isInboxPage() {
+    return window.location.href.includes('page=inbox') || 
+           window.location.pathname.includes('/inbox');
   }
   
   // Monitor for dialog/modal opening
   const observer = new MutationObserver((mutations) => {
+    if (!isInboxPage()) return; // Skip if not on inbox page
+    
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType === 1) { // Element node
@@ -535,7 +527,6 @@ body:not([data-theme="dark"]) {
           )) {
             const text = node.textContent || '';
             if (text.toLowerCase().includes('conversation') || text.toLowerCase().includes('from')) {
-              console.log('🎯 New conversation dialog opened, populating dropdown...');
               setTimeout(populateFromDropdown, 500);
               setTimeout(populateFromDropdown, 1000);
               setTimeout(populateFromDropdown, 2000);
@@ -546,14 +537,18 @@ body:not([data-theme="dark"]) {
     });
   });
   
-  // Start observing when body is ready
+  // Start observing when body is ready AND on inbox page
   const startObserving = () => {
+    if (!isInboxPage()) {
+      // Don't log anything if not on inbox page
+      return;
+    }
+    
     if (document.body) {
       observer.observe(document.body, {
         childList: true,
         subtree: true
       });
-      console.log('✅ "Start New Conversation" fix active - monitoring for dialogs');
     }
   };
   
@@ -563,19 +558,533 @@ body:not([data-theme="dark"]) {
     startObserving();
   }
   
-  // Also try to populate on any button click that might open the dialog
+  // Also try to populate on any button click that might open the dialog (ONLY on inbox page)
   document.addEventListener('click', (e) => {
+    if (!isInboxPage()) return;
+    
     const target = e.target;
     const text = target.textContent || '';
     
     if (text.toLowerCase().includes('conversation') || 
         text.toLowerCase().includes('new message')) {
-      console.log('🎯 Conversation button clicked, will populate dropdown...');
       setTimeout(populateFromDropdown, 500);
       setTimeout(populateFromDropdown, 1000);
     }
   }, true);
   
-  console.log('✅ Dropdown fix initialized');
+  // Check URL changes for SPA
+  let lastUrl = location.href;
+  new MutationObserver(() => {
+    const url = location.href;
+    if (url !== lastUrl) {
+      lastUrl = url;
+      if (isInboxPage()) {
+        startObserving();
+      }
+    }
+  }).observe(document, {subtree: true, childList: true});
+})();
+</script>
+
+<!-- ========================================
+     PHONEBOOK FIX - Intercept and Fix UI
+     ======================================== -->
+<script>
+(function() {
+  'use strict';
+  
+  console.log('🔧 Phonebook Fix Loaded');
+  
+  // Wait for React to load
+  function waitForReact() {
+    if (window.location.href.includes('page=phonebook')) {
+      console.log('📒 On phonebook page, applying fixes...');
+      
+      // Monitor for "Add Phonebook" dialog
+      const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+          mutation.addedNodes.forEach((node) => {
+            if (node.nodeType === 1) {
+              // Check if it's the phonebook dialog
+              if (node.matches && (
+                  node.matches('[role="dialog"]') || 
+                  node.matches('.MuiDialog-root')
+              )) {
+                const dialogText = node.textContent || '';
+                if (dialogText.toLowerCase().includes('phonebook')) {
+                  console.log('📒 Phonebook dialog detected, fixing...');
+                  fixPhonebookDialog(node);
+                }
+              }
+            }
+          });
+        });
+      });
+      
+      if (document.body) {
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true
+        });
+      }
+      
+      // Also fix any existing "Add Phonebook" buttons
+      setTimeout(() => {
+        const buttons = document.querySelectorAll('button');
+        buttons.forEach(btn => {
+          const text = btn.textContent || '';
+          if (text.toLowerCase().includes('add phonebook') || 
+              text.toLowerCase().includes('phonebook') ||
+              text.toLowerCase().includes('add contact')) {
+            console.log('📒 Found button:', text);
+            
+            // Remove existing listeners and add new one
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode?.replaceChild(newBtn, btn);
+            
+            newBtn.addEventListener('click', (e) => {
+              console.log('📒 Phonebook button clicked:', text);
+              
+              // Prevent default behavior
+              e.preventDefault();
+              e.stopPropagation();
+              
+              // Open our helper page instead
+              if (text.toLowerCase().includes('add phonebook')) {
+                handleAddPhonebook();
+              } else if (text.toLowerCase().includes('add contact')) {
+                handleAddContact();
+              }
+            }, true);
+          }
+        });
+      }, 2000);
+    }
+  }
+  
+  function fixPhonebookDialog(dialog) {
+    // Find the form in the dialog
+    const forms = dialog.querySelectorAll('form');
+    forms.forEach(form => {
+      console.log('📋 Found form in phonebook dialog');
+      
+      // Prevent default form submission
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        console.log('📋 Form submitted, handling manually...');
+        
+        // Get form data
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+        
+        console.log('📋 Form data:', data);
+        
+        // Get JWT token
+        const token = getJWTToken();
+        if (!token) {
+          alert('Please login first');
+          return;
+        }
+        
+        // Determine if it's phonebook or contact
+        if (data.name && !data.mobile) {
+          // Creating phonebook
+          await createPhonebook(data.name, token);
+        } else if (data.mobile) {
+          // Adding contact
+          await addContact(data, token);
+        }
+        
+        // Close dialog
+        const closeBtn = dialog.querySelector('button[aria-label="close"], button:has-text("Cancel")');
+        if (closeBtn) closeBtn.click();
+        
+        // Refresh page
+        setTimeout(() => window.location.reload(), 1000);
+      }, true);
+    });
+  }
+  
+  function getJWTToken() {
+    try {
+      const userData = localStorage.getItem('wacrm_user');
+      if (userData) {
+        try {
+          const parsed = JSON.parse(userData);
+          return parsed.token || userData;
+        } catch {
+          return userData;
+        }
+      }
+    } catch (error) {
+      console.error('Error getting token:', error);
+    }
+    return null;
+  }
+  
+  async function createPhonebook(name, token) {
+    try {
+      console.log('📒 Creating phonebook:', name);
+      
+      const response = await fetch('/api/phonebook/add', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('✅ Phonebook created!');
+        alert('✅ Phonebook created successfully!');
+      } else {
+        console.error('❌ Failed:', result.msg);
+        alert('❌ ' + result.msg);
+      }
+    } catch (error) {
+      console.error('Error creating phonebook:', error);
+      alert('❌ Error: ' + error.message);
+    }
+  }
+  
+  async function addContact(data, token) {
+    try {
+      console.log('📇 Adding contact:', data);
+      
+      const response = await fetch('/api/phonebook/add_single_contact', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          id: data.phonebook_id || data.id,
+          phonebook_name: data.phonebook_name || '',
+          name: data.name || '',
+          mobile: data.mobile || '',
+          var1: data.var1 || '',
+          var2: data.var2 || '',
+          var3: data.var3 || '',
+          var4: data.var4 || '',
+          var5: data.var5 || ''
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('✅ Contact added!');
+        alert('✅ Contact added successfully!');
+      } else {
+        console.error('❌ Failed:', result.msg);
+        alert('❌ ' + result.msg);
+      }
+    } catch (error) {
+      console.error('Error adding contact:', error);
+      alert('❌ Error: ' + error.message);
+    }
+  }
+  
+  function handleAddPhonebook() {
+    // Create a beautiful Material-UI style modal
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      backdrop-filter: blur(4px);
+    `;
+    
+    const dialog = document.createElement('div');
+    dialog.style.cssText = `
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      min-width: 400px;
+      max-width: 500px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      animation: slideIn 0.3s ease-out;
+    `;
+    
+    dialog.innerHTML = `
+      <style>
+        @keyframes slideIn {
+          from {
+            opacity: 0;
+            transform: translateY(-20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+      </style>
+      <h2 style="margin: 0 0 20px 0; color: #1976d2; font-size: 24px; font-weight: 500;">
+        📒 Add New Phonebook
+      </h2>
+      <div style="margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 8px; color: #333; font-weight: 500;">
+          Phonebook Name <span style="color: red;">*</span>
+        </label>
+        <input 
+          type="text" 
+          id="phonebookNameInput"
+          placeholder="e.g., My Customers, VIP Clients, Leads"
+          style="
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            box-sizing: border-box;
+            transition: border-color 0.3s;
+          "
+          autofocus
+        />
+      </div>
+      <div style="display: flex; gap: 12px; justify-content: flex-end;">
+        <button 
+          id="cancelBtn"
+          style="
+            padding: 10px 24px;
+            border: none;
+            background: #f5f5f5;
+            color: #666;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+          "
+        >
+          Cancel
+        </button>
+        <button 
+          id="createBtn"
+          style="
+            padding: 10px 24px;
+            border: none;
+            background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+            color: white;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+          "
+        >
+          ✓ Create Phonebook
+        </button>
+      </div>
+    `;
+    
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+    
+    // Focus input
+    const input = dialog.querySelector('#phonebookNameInput');
+    input.focus();
+    
+    // Add hover effects
+    const createBtn = dialog.querySelector('#createBtn');
+    const cancelBtn = dialog.querySelector('#cancelBtn');
+    
+    createBtn.onmouseover = () => {
+      createBtn.style.transform = 'translateY(-2px)';
+      createBtn.style.boxShadow = '0 5px 20px rgba(25, 118, 210, 0.4)';
+    };
+    createBtn.onmouseout = () => {
+      createBtn.style.transform = 'translateY(0)';
+      createBtn.style.boxShadow = 'none';
+    };
+    
+    cancelBtn.onmouseover = () => {
+      cancelBtn.style.background = '#e0e0e0';
+    };
+    cancelBtn.onmouseout = () => {
+      cancelBtn.style.background = '#f5f5f5';
+    };
+    
+    // Input focus effect
+    input.onfocus = () => {
+      input.style.borderColor = '#1976d2';
+      input.style.outline = 'none';
+    };
+    input.onblur = () => {
+      input.style.borderColor = '#e0e0e0';
+    };
+    
+    // Handle close
+    const closeModal = () => {
+      modal.style.animation = 'fadeOut 0.2s';
+      setTimeout(() => modal.remove(), 200);
+    };
+    
+    // Cancel button
+    cancelBtn.onclick = closeModal;
+    
+    // Click outside to close
+    modal.onclick = (e) => {
+      if (e.target === modal) closeModal();
+    };
+    
+    // Escape key to close
+    const escHandler = (e) => {
+      if (e.key === 'Escape') {
+        closeModal();
+        document.removeEventListener('keydown', escHandler);
+      }
+    };
+    document.addEventListener('keydown', escHandler);
+    
+    // Create button
+    const handleCreate = async () => {
+      const name = input.value.trim();
+      if (!name) {
+        input.style.borderColor = 'red';
+        input.placeholder = 'Please enter a name!';
+        input.focus();
+        return;
+      }
+      
+      const token = getJWTToken();
+      if (!token) {
+        showNotification('❌ Please login first', 'error');
+        closeModal();
+        return;
+      }
+      
+      // Disable button and show loading
+      createBtn.disabled = true;
+      createBtn.style.opacity = '0.6';
+      createBtn.style.cursor = 'not-allowed';
+      createBtn.innerHTML = '⏳ Creating...';
+      
+      try {
+        const response = await fetch('/api/phonebook/add', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ name })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          showNotification('✅ Phonebook created successfully!', 'success');
+          closeModal();
+          setTimeout(() => window.location.reload(), 1000);
+        } else {
+          showNotification('❌ ' + result.msg, 'error');
+          createBtn.disabled = false;
+          createBtn.style.opacity = '1';
+          createBtn.style.cursor = 'pointer';
+          createBtn.innerHTML = '✓ Create Phonebook';
+        }
+      } catch (error) {
+        showNotification('❌ Error: ' + error.message, 'error');
+        createBtn.disabled = false;
+        createBtn.style.opacity = '1';
+        createBtn.style.cursor = 'pointer';
+        createBtn.innerHTML = '✓ Create Phonebook';
+      }
+    };
+    
+    createBtn.onclick = handleCreate;
+    
+    // Enter key to submit
+    input.onkeypress = (e) => {
+      if (e.key === 'Enter') handleCreate();
+    };
+  }
+  
+  function showNotification(message, type = 'info') {
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 16px 24px;
+      background: ${type === 'success' ? '#4caf50' : type === 'error' ? '#f44336' : '#2196f3'};
+      color: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      z-index: 10000;
+      font-size: 16px;
+      font-weight: 500;
+      animation: slideInRight 0.3s ease-out;
+    `;
+    
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes slideInRight {
+        from {
+          opacity: 0;
+          transform: translateX(100px);
+        }
+        to {
+          opacity: 1;
+          transform: translateX(0);
+        }
+      }
+      @keyframes fadeOut {
+        from {
+          opacity: 1;
+        }
+        to {
+          opacity: 0;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+    
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+      notification.style.animation = 'fadeOut 0.3s';
+      setTimeout(() => notification.remove(), 300);
+    }, 3000);
+  }
+  
+  function handleAddContact() {
+    // Redirect to helper page for adding contacts
+    window.location.href = '/phonebook-helper.html';
+  }
+  
+  // URL change detection
+  let lastUrl = location.href;
+  new MutationObserver(() => {
+    const url = location.href;
+    if (url !== lastUrl) {
+      lastUrl = url;
+      if (url.includes('page=phonebook')) {
+        setTimeout(waitForReact, 1000);
+      }
+    }
+  }).observe(document, {subtree: true, childList: true});
+  
+  // Initial check
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', waitForReact);
+  } else {
+    waitForReact();
+  }
+  
+  console.log('✅ Phonebook fix initialized');
 })();
 </script></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div></body></html>

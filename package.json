@@ -3,7 +3,8 @@
   "description": "this code is made for https://codecanyon.net/user/codeyon_itservices/portfolio created by hamidsaifi.com",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest --verbose --runInBand",
+    "test:exploration": "jest test/bug-condition-exploration.test.js --verbose --runInBand",
     "start": "node server.js"
   },
   "keywords": [],
@@ -56,6 +57,8 @@
   "version": "1.0.0",
   "devDependencies": {
     "@playwright/test": "^1.61.0",
+    "fast-check": "^4.8.0",
+    "jest": "^30.4.2",
     "sequelize-cli": "^6.6.5"
   }
 }

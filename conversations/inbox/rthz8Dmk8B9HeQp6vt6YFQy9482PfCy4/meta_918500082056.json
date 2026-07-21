@@ -1,0 +1,38 @@
+[
+  {
+    "type": "text",
+    "metaChatId": "wamid.HBgMOTE4NTAwMDgyMDU2FQIAERgSMUQxNkU2RDMyOUIwNjQ0OEIyAA==",
+    "msgContext": {
+      "type": "text",
+      "text": {
+        "preview_url": true,
+        "body": "Hello! This is a test message from WhatsCRM."
+      }
+    },
+    "reaction": "",
+    "timestamp": 1782128161,
+    "senderName": "Test User",
+    "senderMobile": "918500082056",
+    "status": "sent",
+    "star": false,
+    "route": "OUTGOING"
+  },
+  {
+    "type": "text",
+    "metaChatId": "wamid.HBgMOTE4NTAwMDgyMDU2FQIAERgSNENDQUY0OUVBOTY0QTI0NzBFAA==",
+    "msgContext": {
+      "type": "text",
+      "text": {
+        "preview_url": true,
+        "body": "Hello! This is a test message from WhatsCRM."
+      }
+    },
+    "reaction": "",
+    "timestamp": 1782128167,
+    "senderName": "Test User",
+    "senderMobile": "918500082056",
+    "status": "sent",
+    "star": false,
+    "route": "OUTGOING"
+  }
+]

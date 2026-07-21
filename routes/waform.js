@@ -5,7 +5,7 @@ const { checkPlan, checkWaForms } = require("../middlewares/plan.js");
 const axios = require("axios");
 const FormData = require("form-data");
 
-const API_VERSION = "v20.0";
+const API_VERSION = "v25.0";
 
 // ─── HELPER ───────────────────────────────────────────────────────────────────
 async function getMetaConfig(uid) {
@@ -248,6 +248,14 @@ router.post(
   async (req, res) => {
     try {
       const { name, description, fields = [] } = req.body;
+      
+      // DEBUG: Log the incoming request
+      console.log('=== CREATE FORM DEBUG ===');
+      console.log('Name:', name);
+      console.log('Description:', description);
+      console.log('Fields:', JSON.stringify(fields, null, 2));
+      console.log('Fields count:', fields.length);
+      
       const metaApi = await getMetaConfig(req.decode.uid);
       if (!metaApi)
         return res.json({ success: false, msg: "Meta API not configured" });
@@ -267,6 +275,8 @@ router.post(
 
       // 2. Upload dynamic Flow JSON
       const flowJSON = buildFlowJSON(name, fields);
+      console.log('Flow JSON built:', JSON.stringify(flowJSON, null, 2));
+      
       const form = new FormData();
       form.append("name", "flow.json");
       form.append("asset_type", "FLOW_JSON");
@@ -316,11 +326,16 @@ router.post(
 
       res.json({ success: true, msg: "Form created successfully", flowId });
     } catch (err) {
-      console.error(err);
+      console.error('=== CREATE FORM ERROR ===');
+      console.error('Error message:', err.message);
+      console.error('Error response:', JSON.stringify(err.response?.data, null, 2));
+      console.error('Full error:', err);
+      
       res.json({
         success: false,
         msg: err.response?.data?.error?.message || "Something went wrong",
         error: err.response?.data || err.message,
+        errorDetails: err.response?.data?.error || null
       });
     }
   },
@@ -639,29 +654,68 @@ router.post(
   checkWaForms,
   async (req, res) => {
     try {
+      console.log('🗑️ DELETE FORM REQUEST RECEIVED:', {
+        id: req.body.id,
+        uid: req.decode.uid,
+        timestamp: new Date().toISOString()
+      });
+
       const { id } = req.body;
+      
+      if (!id) {
+        console.error('❌ DELETE FORM: No ID provided');
+        return res.json({ success: false, msg: "Form ID is required" });
+      }
+
       const [form] = await query(
         `SELECT * FROM wa_forms WHERE id = ? AND uid = ?`,
         [id, req.decode.uid],
       );
-      if (!form) return res.json({ success: false, msg: "Form not found" });
+      
+      if (!form) {
+        console.error('❌ DELETE FORM: Form not found in database:', { id, uid: req.decode.uid });
+        return res.json({ success: false, msg: "Form not found" });
+      }
+
+      console.log('📋 Form found in database:', {
+        id: form.id,
+        name: form.name,
+        flow_id: form.flow_id
+      });
 
       const metaApi = await getMetaConfig(req.decode.uid);
       if (metaApi && form.flow_id) {
-        await axios
-          .delete(`https://graph.facebook.com/${API_VERSION}/${form.flow_id}`, {
+        console.log('🔄 Attempting to delete from Meta API:', form.flow_id);
+        try {
+          await axios.delete(`https://graph.facebook.com/${API_VERSION}/${form.flow_id}`, {
             headers: { Authorization: `Bearer ${metaApi.access_token}` },
-          })
-          .catch(() => {});
+          });
+          console.log('✅ Deleted from Meta API successfully');
+        } catch (metaError) {
+          console.warn('⚠️ Meta API delete failed (continuing anyway):', metaError.message);
+        }
       }
 
-      await query(`DELETE FROM wa_forms WHERE id = ? AND uid = ?`, [
+      console.log('🗑️ Deleting from database...');
+      const result = await query(`DELETE FROM wa_forms WHERE id = ? AND uid = ?`, [
         id,
         req.decode.uid,
       ]);
+      
+      console.log('✅ DELETE FORM SUCCESS:', {
+        id,
+        affectedRows: result.affectedRows,
+        timestamp: new Date().toISOString()
+      });
+
       res.json({ success: true, msg: "Form deleted" });
     } catch (err) {
-      res.json({ success: false, msg: "Something went wrong", error: err });
+      console.error('❌ DELETE FORM ERROR:', {
+        error: err.message,
+        stack: err.stack,
+        body: req.body
+      });
+      res.json({ success: false, msg: "Something went wrong", error: err.message });
     }
   },
 );

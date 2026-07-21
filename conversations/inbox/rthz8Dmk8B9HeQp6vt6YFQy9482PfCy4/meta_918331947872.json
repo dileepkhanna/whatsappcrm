@@ -1,0 +1,38 @@
+[
+  {
+    "type": "text",
+    "metaChatId": "wamid.HBgMOTE4MzMxOTQ3ODcyFQIAERgSNUQ2OEIzN0U3RjNDRTBDNjcwAA==",
+    "msgContext": {
+      "type": "text",
+      "text": {
+        "preview_url": true,
+        "body": "Test message from API"
+      }
+    },
+    "reaction": "",
+    "timestamp": 1782366306,
+    "senderName": "Test User",
+    "senderMobile": "918331947872",
+    "status": "sent",
+    "star": false,
+    "route": "OUTGOING"
+  },
+  {
+    "type": "text",
+    "metaChatId": "wamid.HBgMOTE4MzMxOTQ3ODcyFQIAERgSQURBRTE5QjJGOTBCNjc4QzZFAA==",
+    "msgContext": {
+      "type": "text",
+      "text": {
+        "preview_url": true,
+        "body": "Test message from API"
+      }
+    },
+    "reaction": "",
+    "timestamp": 1782366332,
+    "senderName": "Test User",
+    "senderMobile": "918331947872",
+    "status": "sent",
+    "star": false,
+    "route": "OUTGOING"
+  }
+]

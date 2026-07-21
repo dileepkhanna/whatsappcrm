@@ -51,7 +51,7 @@ const validateAgent = async (req, res, next) => {
           });
         }
 
-        if (getAgent[0].role === "agent") {
+        if (decode.role === "agent") {
           req.owner = getOwner[0];
           req.decode = decode;
           req.decode.userData = getAgent[0];

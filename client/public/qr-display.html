@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp QR Code Display</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 100%;
+            padding: 40px;
+            text-align: center;
+        }
+
+        h1 {
+            color: #25D366;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #25D366;
+        }
+
+        button {
+            background: #25D366;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        button:hover {
+            background: #128C7E;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(37, 211, 102, 0.3);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        #qrcode {
+            margin: 30px auto;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            display: inline-block;
+            min-height: 256px;
+        }
+
+        .instructions {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            text-align: left;
+        }
+
+        .instructions h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+
+        .instructions ol {
+            margin-left: 20px;
+            color: #666;
+            line-height: 1.8;
+        }
+
+        .instructions li {
+            margin-bottom: 8px;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }
+
+        .status.info {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .status.success {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+
+        .status.error {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .token-info {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 13px;
+            color: #856404;
+        }
+
+        .auto-generate-btn {
+            background: #667eea;
+            margin-top: 10px;
+        }
+
+        .auto-generate-btn:hover {
+            background: #5568d3;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #25D366;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📱 WhatsApp QR Connect</h1>
+        <p class="subtitle">Generate and scan QR code to connect WhatsApp</p>
+
+        <div id="tokenInfo" class="token-info hidden">
+            <strong>⚠️ Token Required</strong><br>
+            You need a valid auth token. Please login first or paste your token below.
+        </div>
+
+        <div class="input-group">
+            <input type="text" id="sessionId" placeholder="Session ID (e.g., my_session_123)" value="">
+        </div>
+
+        <div class="input-group">
+            <input type="password" id="authToken" placeholder="Auth Token (from localStorage)" value="">
+        </div>
+
+        <button onclick="generateQR()">
+            <span id="btnText">🎯 Generate QR Code</span>
+        </button>
+
+        <button class="auto-generate-btn" onclick="autoFillAndGenerate()">
+            ⚡ Auto-Fill & Generate
+        </button>
+
+        <div id="status" class="status hidden"></div>
+
+        <div id="qrcodeContainer" class="hidden">
+            <div id="qrcode"></div>
+        </div>
+
+        <div class="instructions">
+            <h3>📖 How to Use:</h3>
+            <ol>
+                <li>Click <strong>"Auto-Fill & Generate"</strong> (easiest) or enter session ID manually</li>
+                <li>Wait for QR code to appear</li>
+                <li>Open WhatsApp on your phone</li>
+                <li>Go to <strong>Settings → Linked Devices</strong></li>
+                <li>Tap <strong>"Link a Device"</strong></li>
+                <li>Scan the QR code shown above</li>
+                <li>Wait for connection confirmation!</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // Try to get token from localStorage
+        const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+        
+        if (token) {
+            document.getElementById('authToken').value = token;
+        } else {
+            document.getElementById('tokenInfo').classList.remove('hidden');
+        }
+
+        function autoFillAndGenerate() {
+            // Generate random session ID
+            const sessionId = 'qr_session_' + Date.now();
+            document.getElementById('sessionId').value = sessionId;
+
+            // Try to get token from localStorage
+            const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+            if (token) {
+                document.getElementById('authToken').value = token;
+            }
+
+            // Generate QR
+            setTimeout(() => generateQR(), 100);
+        }
+
+        async function generateQR() {
+            const sessionId = document.getElementById('sessionId').value.trim();
+            const authToken = document.getElementById('authToken').value.trim();
+
+            if (!sessionId) {
+                showStatus('Please enter a Session ID', 'error');
+                return;
+            }
+
+            if (!authToken) {
+                showStatus('Please enter your Auth Token (from localStorage)', 'error');
+                document.getElementById('tokenInfo').classList.remove('hidden');
+                return;
+            }
+
+            // Show loading
+            const btnText = document.getElementById('btnText');
+            btnText.innerHTML = '<span class="loading"></span>Generating QR...';
+            document.getElementById('qrcodeContainer').classList.add('hidden');
+            document.getElementById('qrcode').innerHTML = '';
+
+            showStatus('Generating QR code...', 'info');
+
+            try {
+                // Call API to generate QR
+                const response = await fetch('/api/qr/gen_qr', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({
+                        uniqueId: sessionId
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.message || 'Failed to generate QR');
+                }
+
+                showStatus('✅ QR generation started! Waiting for QR data...', 'success');
+
+                // Listen for QR via Socket.IO or polling
+                // For now, let's show instructions to check terminal
+                setTimeout(() => {
+                    showStatus('⚠️ QR code generated! Please check your SERVER TERMINAL to see the QR code.', 'info');
+                }, 2000);
+
+                // Also try to get QR via polling (if API supports it)
+                pollForQR(sessionId, authToken);
+
+            } catch (error) {
+                showStatus('❌ Error: ' + error.message, 'error');
+                console.error('Error generating QR:', error);
+            } finally {
+                btnText.innerHTML = '🎯 Generate QR Code';
+            }
+        }
+
+        async function pollForQR(sessionId, authToken, attempts = 0) {
+            if (attempts >= 10) {
+                showStatus('⚠️ QR not received. Please check your server terminal for the QR code.', 'info');
+                return;
+            }
+
+            try {
+                // Try to get session status
+                const response = await fetch(`/api/qr/status/${sessionId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.qr) {
+                        displayQR(data.qr);
+                        return;
+                    }
+                }
+            } catch (error) {
+                // Ignore errors during polling
+            }
+
+            // Try again after 1 second
+            setTimeout(() => pollForQR(sessionId, authToken, attempts + 1), 1000);
+        }
+
+        function displayQR(qrData) {
+            document.getElementById('qrcodeContainer').classList.remove('hidden');
+            document.getElementById('qrcode').innerHTML = '';
+            
+            // If qrData is a data URL, create an image
+            if (qrData.startsWith('data:image')) {
+                const img = document.createElement('img');
+                img.src = qrData;
+                img.style.maxWidth = '300px';
+                document.getElementById('qrcode').appendChild(img);
+            } else {
+                // Otherwise generate QR from the string
+                new QRCode(document.getElementById('qrcode'), {
+                    text: qrData,
+                    width: 300,
+                    height: 300,
+                    colorDark: '#000000',
+                    colorLight: '#ffffff',
+                    correctLevel: QRCode.CorrectLevel.H
+                });
+            }
+
+            showStatus('✅ QR Code ready! Scan with your phone now!', 'success');
+        }
+
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = 'status ' + type;
+            status.classList.remove('hidden');
+        }
+
+        // Check if we're logged in and auto-detect token
+        window.addEventListener('load', () => {
+            const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+            if (!token) {
+                showStatus('ℹ️ Please login first to get your auth token', 'info');
+            }
+        });
+    </script>
+</body>
+</html>

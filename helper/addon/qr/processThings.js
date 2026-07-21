@@ -212,6 +212,17 @@ function getChatId({ instanceNumber, senderMobile, uid }) {
 
 async function saveMessageToConversation({ uid, chatId, messageData }) {
   try {
+    // Check if message already exists (prevent duplicates)
+    const [existing] = await query(
+      `SELECT id FROM beta_conversation WHERE metaChatId = ? AND uid = ? LIMIT 1`,
+      [messageData.metaChatId, uid]
+    );
+    
+    if (existing) {
+      console.log(`⏭️  Message ${messageData.metaChatId} already exists, skipping duplicate`);
+      return false;
+    }
+    
     await query(`INSERT INTO beta_conversation SET ?`, {
       type: messageData.type,
       metaChatId: messageData.metaChatId,
@@ -238,7 +249,7 @@ async function processBaileysMsg({ body, uid, userFromMysql, chatId }) {
   try {
     if (!body) return null;
 
-    // Status Update Handling
+    // Status Update Handling (before checking message field)
     if (body.update && typeof body.update.status === "number") {
       if (!body.key?.fromMe) {
         return { newMessage: null, chatId };
@@ -256,10 +267,31 @@ async function processBaileysMsg({ body, uid, userFromMysql, chatId }) {
       return { newMessage: null, chatId };
     }
 
+    // Check if message field exists
+    // Messages without message field are usually:
+    // - Status receipts (delivered, read) for fromMe messages
+    // - Protocol messages
+    // - Other system-level updates
+    // These should be silently ignored (not logged as errors)
+    if (!body.message) {
+      // Silent ignore - these are normal Baileys events
+      return { newMessage: null, chatId };
+    }
+
     let msgContext = null;
     let referencedMessageData = null;
 
     // console.log({ body: JSON.stringify(body) });
+
+    // Ignore protocol messages (system messages, history sync, etc.)
+    if (body.message.protocolMessage) {
+      // These are system-level messages like:
+      // - HISTORY_SYNC_NOTIFICATION (syncing old messages)
+      // - REVOKE (message deleted)
+      // - EPHEMERAL_SETTING (disappearing messages setting change)
+      // We don't save these as regular chat messages
+      return { newMessage: null, chatId };
+    }
 
     // Determine message type
     if (body.message.conversation) {
@@ -400,8 +432,13 @@ async function processBaileysMsg({ body, uid, userFromMysql, chatId }) {
         referencedMessageData = doc.contextInfo.quotedMessage;
       }
     } else {
-      console.warn("Unsupported message type in Baileys webhook");
-      return null;
+      // Log what message types are present for debugging
+      const messageTypes = Object.keys(body.message);
+      console.warn("⚠️ Unsupported message type in Baileys webhook");
+      console.warn("   Message types present:", messageTypes.join(", "));
+      console.warn("   Full message structure:", JSON.stringify(body.message, null, 2));
+      console.warn("   This might be a new message type that needs to be added");
+      return { newMessage: null, chatId };
     }
 
     // Determine context from quoted message if available
@@ -426,7 +463,9 @@ async function processBaileysMsg({ body, uid, userFromMysql, chatId }) {
         userFromMysql?.timezone || body.messageTimestamp
       ),
       senderName: body.pushName || "NA",
-      senderMobile: body.key.remoteJid
+      senderMobile: body.key.remoteJidAlt
+        ? body.key.remoteJidAlt.split("@")[0]  // Use remoteJidAlt if available (LID messages)
+        : body.key.remoteJid
         ? body.key.remoteJid.split("@")[0]
         : "NA",
       status: "",
@@ -459,8 +498,7 @@ async function getUserDetails(sessionId, userData) {
         uid,
         number,
         uniqueId,
-        data,
-        other
+        status
       FROM instance
       WHERE uniqueId = ?
       LIMIT 1`,
@@ -477,8 +515,6 @@ async function getUserDetails(sessionId, userData) {
         uid: instance.uid,
         number: instance.number,
         uniqueId: instance.uniqueId,
-        data: instance.data,
-        other: instance.other,
         status: instance.status,
       },
     };
@@ -505,18 +541,21 @@ async function processMessageQr({
 
     const instanceNumber = userDetails?.instance?.number;
 
-    if (!instanceNumber || !message.key.remoteJid || !uid) {
+    // Get the correct phone number - prefer remoteJidAlt (for LID messages) over remoteJid
+    const senderMobile = message.key.remoteJidAlt || message.key.remoteJid;
+
+    if (!instanceNumber || !senderMobile || !uid) {
       console.log("Details not found to update chat list");
       console.log({
         instanceNumber,
-        senderMobile: message.key.remoteJid,
+        senderMobile,
         uid,
       });
     }
 
     const chatId = getChatId({
       instanceNumber,
-      senderMobile: message.key.remoteJid,
+      senderMobile,
       uid,
     });
 
@@ -537,7 +576,7 @@ async function processMessageQr({
         actualMsg: data.newMessage,
         sessionId,
         getSession,
-        jid: message?.remoteJid || message?.key?.remoteJid,
+        jid: message?.key?.remoteJidAlt || message?.remoteJid || message?.key?.remoteJid,
         userPromise: userDetails,
         user: userData,
       });

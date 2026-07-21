@@ -1,4 +1,80 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"/><link rel="icon" href="/favicon.ico"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="theme-color" content="#000000"/><meta name="description" content="WhatsCRM is an all-in-one cloud-based platform for WhatsApp, Instagram, and Telegram marketing and automation."/><link rel="apple-touch-icon" href="/logo192.png"/><link rel="manifest" href="/manifest.json"/><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;600;700&display=swap"/><title>whatsCRM</title><meta property="og:description" content="WhatsCRM is an all-in-one cloud-based platform for WhatsApp, Instagram, and Telegram marketing and automation."/><meta name="twitter:description" content="WhatsCRM is an all-in-one cloud-based platform for WhatsApp, Instagram, and Telegram marketing and automation."/><meta property="og:title" content="whatsCRM"/><meta name="twitter:title" content="whatsCRM"/><meta name="application-name" content="whatsCRM"/><meta name="apple-mobile-web-app-title" content="whatsCRM"/><meta property="og:image" content="/media/SKY74m0bbNj1U0o2X286vyDbjnBIk2Tm.png"/><meta name="twitter:image" content="/media/SKY74m0bbNj1U0o2X286vyDbjnBIk2Tm.png"/><style>
+<!doctype html><html lang="en"><head><meta charset="utf-8"/>
+
+<!-- ASE TECHNOLOGIES BRANDING - INSTANT REPLACEMENT -->
+<script>
+(function(){
+const originalDefineProperty = Object.defineProperty;
+Object.defineProperty = function(obj, prop, descriptor) {
+  if (descriptor && descriptor.value && typeof descriptor.value === 'string') {
+    descriptor.value = descriptor.value
+      .replace(/The #1/g, 'Professional')
+      .replace(/The #10/g, 'Professional')
+      .replace(/WhatsApp Automation/g, 'WhatsApp CRM')
+      .replace(/growth platform/g, 'by ASE Technologies')
+      .replace(/Get started free/g, 'Get Started');
+  }
+  return originalDefineProperty.call(this, obj, prop, descriptor);
+};
+})();
+</script>
+
+<style>*,:after,:before{scrollbar-width:none!important;-ms-overflow-style:none!important}*::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}</style><link rel="icon" href="/favicon.ico"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="theme-color" content="#000000"/><meta name="description" content="WhatsCRM is an all-in-one cloud-based platform for WhatsApp, Instagram, and Telegram marketing and automation."/><link rel="apple-touch-icon" href="/apple-touch-icon.png"/><link rel="manifest" href="/manifest.json"/><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;600;700&display=swap"/><link rel="stylesheet" href="/hide-scrollbar.css"/><title>whatsCRM</title><meta property="og:description" content="WhatsCRM is an all-in-one cloud-based platform for WhatsApp, Instagram, and Telegram marketing and automation."/><meta name="twitter:description" content="WhatsCRM is an all-in-one cloud-based platform for WhatsApp, Instagram, and Telegram marketing and automation."/><meta property="og:title" content="whatsCRM"/><meta name="twitter:title" content="whatsCRM"/><meta name="application-name" content="whatsCRM"/><meta name="apple-mobile-web-app-title" content="whatsCRM"/><meta property="og:image" content="/media/SKY74m0bbNj1U0o2X286vyDbjnBIk2Tm.png"/><meta name="twitter:image" content="/media/SKY74m0bbNj1U0o2X286vyDbjnBIk2Tm.png"/><style>
+/* ========================================
+   SCROLLBAR VISIBILITY FIX - OPTIMIZED
+   ======================================== */
+
+/* Hide scrollbar only on specific elements, not globally */
+::-webkit-scrollbar {
+  width: 8px; /* Keep scrollbar but make it thin */
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* Firefox - only hide on body */
+body {
+  scrollbar-width: thin; /* Keep thin scrollbar instead of none */
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+
+/* ========================================
+   ASE TECHNOLOGIES BRANDING - CSS OVERRIDE
+   Hide old content, inject new content
+   ======================================== */
+
+/* Hide elements containing old text */
+h1:has(:contains("The #1")),
+h2:has(:contains("The #1")),
+div:has(:contains("The #1")):not(:has(div)) {
+  font-size: 0 !important;
+}
+
+/* Inject new content with ::before */
+h1:has(:contains("The #1"))::before,
+h2:has(:contains("The #1"))::before {
+  content: "Professional" !important;
+  font-size: 5rem !important;
+  font-weight: 700 !important;
+  display: block !important;
+}
+
+/* Additional CSS-based text replacement */
+* {
+  visibility: visible !important;
+}
+
+
 /* ========================================
    CURSOR VISIBILITY FIX FOR LIGHT MODE
    ======================================== */
@@ -10,6 +86,7 @@
 
 body {
   cursor: default;
+  overflow-y: auto; /* Maintain scroll functionality */
   /* Add a custom cursor with better visibility */
   cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="black" stroke="white" stroke-width="2" d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>') 0 0, auto;
 }
@@ -96,6 +173,40 @@ body:not([data-theme="dark"]) {
 (function() {
   console.log('🔧 Initializing sidebar and search fixes...');
   
+  console.log('🔧 Dropdown phone number fix loaded');
+  
+  // Fix for "From" dropdown - populate with phone number from API
+  window.addEventListener('load', function() {
+    setTimeout(async function() {
+      try {
+        const token = localStorage.getItem('wacrm_user');
+        if (!token) return;
+        
+        const response = await fetch('/api/user/get_meta_keys', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.data && data.data.display_phone_number) {
+          console.log('✅ Phone number loaded:', data.data.display_phone_number);
+          
+          // Store globally for React to access
+          window.META_PHONE_NUMBER = data.data.display_phone_number;
+          window.META_PHONE_ID = data.data.business_phone_number_id;
+          window.META_API_DATA = data.data;
+          
+          // Dispatch event for React
+          window.dispatchEvent(new CustomEvent('metaKeysLoaded', {
+            detail: data.data
+          }));
+        }
+      } catch (error) {
+        console.error('Error loading phone number:', error);
+      }
+    }, 1500);
+  });
+
   // Special fix for Social Login menu item click
   function fixSocialLoginClick() {
     // Find all elements that might be the Social Login menu item
@@ -363,7 +474,503 @@ body:not([data-theme="dark"]) {
 })();
 </script>
 
-<script defer="defer" src="/static/js/main.dca03fbf.js"></script><link href="/static/css/main.e546b2bd.css" rel="stylesheet">
+<script defer="defer" src="/static/js/main.ase-tech.js?v=20260720-v2"></script><link href="/static/css/main.e546b2bd.css" rel="stylesheet">
+
+<!-- ========================================
+     LANDING PAGE LOGO & NAVIGATION FIX
+     ======================================== -->
+<style>
+/* Ensure all navigation elements are clickable */
+nav, nav *, 
+button, button *,
+a, a *,
+[role="button"], [role="button"] * {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}
+
+/* Ensure navigation items are above everything */
+nav {
+  position: relative;
+  z-index: 9999 !important;
+}
+
+nav a,
+nav button,
+nav [role="button"] {
+  position: relative;
+  z-index: 10000 !important;
+}
+</style>
+
+<script>
+/* ========================================
+   FIX LANDING PAGE LOGO PATH - SAFE VERSION
+   React is loading: /media//assets/ase_logo.png (wrong)
+   Should load: /media/ase_logo.png (correct)
+   ======================================== */
+(function() {
+  console.log('🔧 Landing Page Logo Fix Loading...');
+  
+  let fixCount = 0;
+  const MAX_FIXES = 5; // Only run 5 times max
+  
+  function fixLogoPath() {
+    if (fixCount >= MAX_FIXES) return; // Stop after 5 fixes
+    
+    try {
+      // Find all img elements with incorrect logo path
+      const allImages = document.querySelectorAll('img');
+      let fixed = 0;
+      
+      allImages.forEach(img => {
+        const src = img.src || '';
+        
+        // Fix double slash in logo path
+        if (src.includes('//assets/ase_logo.png') || src.includes('/media//assets/')) {
+          const correctSrc = src.replace('//assets/', '/');
+          console.log('🔧 Fixing logo path:');
+          console.log('   From:', src);
+          console.log('   To:', correctSrc);
+          img.src = correctSrc;
+          fixed++;
+        }
+        
+        // Also check for the logo in nav/header
+        const parent = img.closest('nav, header, [class*="logo"]');
+        if (parent && (src.includes('logo') || src.includes('media'))) {
+          // Make sure it's loading from the right place
+          if (!src.endsWith('/media/ase_logo.png')) {
+            const newSrc = window.location.origin + '/media/ase_logo.png';
+            console.log('🔧 Setting nav logo to:', newSrc);
+            img.src = newSrc;
+            img.style.height = '45px';
+            img.style.width = 'auto';
+            img.style.maxWidth = '180px';
+            fixed++;
+          }
+        }
+      });
+      
+      if (fixed > 0) {
+        console.log('✅ Fixed', fixed, 'logo path(s)');
+        fixCount++;
+      }
+      
+      // Ensure navigation is clickable
+      const navElements = document.querySelectorAll('nav a, nav button, button, a');
+      navElements.forEach(el => {
+        el.style.pointerEvents = 'auto';
+        el.style.cursor = 'pointer';
+      });
+      
+    } catch (error) {
+      console.error('❌ Logo fix error:', error);
+    }
+  }
+  
+  // Run fix on page load only
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fixLogoPath);
+  } else {
+    fixLogoPath();
+  }
+  
+  // Run a few more times with delays (but limited)
+  setTimeout(fixLogoPath, 1000);
+  setTimeout(fixLogoPath, 2000);
+  setTimeout(fixLogoPath, 3000);
+  
+  console.log('✅ Landing page logo fix active (safe mode)');
+})();
+
+/* ========================================
+   FIX NAVIGATION BUTTONS - SAFE VERSION
+   Features, Pricing, Testimonials buttons
+   ======================================== */
+(function() {
+  console.log('🔧 Navigation Button Fix Loading (Safe Mode)...');
+  
+  let hasRun = false; // Prevent infinite loops
+  
+  function fixNavigationButtons() {
+    if (hasRun) return; // Only run once
+    
+    try {
+      // Find all navigation links/buttons
+      const navElements = document.querySelectorAll('nav a, nav button');
+      let fixed = 0;
+      
+      navElements.forEach(element => {
+        const text = (element.textContent || '').trim().toLowerCase();
+        
+        // Check if this is a navigation button
+        if (text === 'features' || text === 'pricing' || text === 'testimonials') {
+          
+          // Mark as fixed
+          if (element.dataset.navFixed) return;
+          element.dataset.navFixed = 'true';
+          
+          // Add click handler (don't replace element)
+          element.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            console.log('🖱️ Navigation clicked:', text);
+            
+            // Map to section ID
+            const sectionMap = {
+              'features': 'features',
+              'pricing': 'pricing',
+              'testimonials': 'testimonials'
+            };
+            
+            const targetId = sectionMap[text];
+            const targetSection = document.getElementById(targetId);
+            
+            if (targetSection) {
+              console.log('✅ Scrolling to:', targetId);
+              targetSection.scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'start' 
+              });
+            } else {
+              console.log('⚠️ Section not found:', targetId);
+            }
+            
+            return false;
+          }, { capture: true, once: false });
+          
+          fixed++;
+          console.log('✅ Fixed navigation button:', text);
+        }
+      });
+      
+      if (fixed > 0) {
+        hasRun = true; // Mark as complete
+        console.log(`✅ Fixed ${fixed} navigation button(s)`);
+      }
+      
+    } catch (error) {
+      console.error('❌ Navigation button fix error:', error);
+    }
+  }
+  
+  // Run fix only once after page loads
+  window.addEventListener('load', function() {
+    setTimeout(fixNavigationButtons, 2000);
+  });
+  
+  console.log('✅ Navigation button fix ready');
+})();
+
+/* ========================================
+   HIDE TESTIMONIALS SECTION
+   ======================================== */
+(function() {
+  console.log('🔧 Hide Testimonials Loading...');
+  
+  function hideTestimonials() {
+    try {
+      // Method 1: Hide by ID
+      const testimonialsById = document.getElementById('testimonials');
+      if (testimonialsById) {
+        testimonialsById.style.display = 'none';
+        console.log('✅ Hidden testimonials section (by ID)');
+        return;
+      }
+      
+      // Method 2: Find sections by text content
+      const allSections = document.querySelectorAll('section, div[class*="section"], div[class*="Section"]');
+      allSections.forEach(section => {
+        const text = (section.textContent || '').toLowerCase();
+        const className = (section.className || '').toLowerCase();
+        
+        // Check if this section contains testimonials
+        if (text.includes('testimonial') || className.includes('testimonial')) {
+          section.style.display = 'none';
+          console.log('✅ Hidden testimonials section (by content)');
+        }
+      });
+      
+      // Method 3: Hide testimonials navigation button
+      const navLinks = document.querySelectorAll('nav a, nav button');
+      navLinks.forEach(link => {
+        const text = (link.textContent || '').trim().toLowerCase();
+        if (text === 'testimonials') {
+          link.style.display = 'none';
+          console.log('✅ Hidden testimonials nav button');
+        }
+      });
+      
+    } catch (error) {
+      console.error('❌ Hide testimonials error:', error);
+    }
+  }
+  
+  // Run on page load
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', hideTestimonials);
+  } else {
+    hideTestimonials();
+  }
+  
+  // Run again after delays to catch React renders
+  setTimeout(hideTestimonials, 1000);
+  setTimeout(hideTestimonials, 2000);
+  setTimeout(hideTestimonials, 3000);
+  
+  console.log('✅ Hide testimonials active');
+})();
+
+/* ========================================
+   FIX PRICING SECTION ALIGNMENT
+   ======================================== */
+(function() {
+  console.log('🔧 Pricing Section Alignment Fix Loading...');
+  
+  function fixPricingAlignment() {
+    try {
+      // Find pricing section
+      const pricingSection = document.getElementById('pricing') || 
+                            document.querySelector('[class*="pricing"]');
+      
+      if (pricingSection) {
+        console.log('✅ Found pricing section');
+        
+        // Fix section overflow and remove sticky positioning
+        pricingSection.style.overflow = 'visible';
+        pricingSection.style.minHeight = 'auto';
+        pricingSection.style.height = 'auto';
+        pricingSection.style.position = 'relative'; // Remove sticky/fixed positioning
+        
+        // Apply flexbox alignment to pricing cards container
+        const cardContainers = pricingSection.querySelectorAll('div');
+        cardContainers.forEach(container => {
+          // Check if this container has pricing cards
+          const hasCards = container.querySelectorAll('[class*="plan"]').length > 1;
+          
+          if (hasCards) {
+            container.style.display = 'flex';
+            container.style.flexWrap = 'wrap';
+            container.style.justifyContent = 'center';
+            container.style.alignItems = 'flex-start'; // Align cards to top
+            container.style.gap = '20px';
+            container.style.overflow = 'visible'; // Allow full content to show
+            container.style.minHeight = 'auto';
+            container.style.height = 'auto';
+            container.style.position = 'relative'; // Remove sticky/fixed
+            console.log('✅ Applied flexbox to pricing container');
+          }
+        });
+        
+        // Find all pricing cards and make them fully visible
+        const pricingCards = pricingSection.querySelectorAll('[class*="plan"]');
+        
+        if (pricingCards.length > 0) {
+          console.log(`✅ Found ${pricingCards.length} pricing card(s)`);
+          
+          // Make all cards fully visible and remove sticky positioning
+          pricingCards.forEach(card => {
+            card.style.display = 'flex';
+            card.style.flexDirection = 'column';
+            card.style.alignSelf = 'flex-start';
+            card.style.overflow = 'visible'; // Show full content
+            card.style.minHeight = 'auto';
+            card.style.height = 'auto';
+            card.style.maxHeight = 'none'; // Remove any height restrictions
+            card.style.position = 'relative'; // Remove sticky/fixed positioning
+            card.style.top = 'auto'; // Reset top positioning
+            card.style.bottom = 'auto'; // Reset bottom positioning
+            
+            // Make sure inner content is visible and not sticky
+            const innerDivs = card.querySelectorAll('div');
+            innerDivs.forEach(div => {
+              div.style.overflow = 'visible';
+              div.style.maxHeight = 'none';
+              div.style.height = 'auto';
+              div.style.position = 'relative'; // Remove sticky/fixed
+              div.style.top = 'auto';
+              div.style.bottom = 'auto';
+            });
+          });
+          
+          console.log('✅ Pricing cards made fully visible and unstuck');
+        }
+        
+        // Remove any parent overflow restrictions and sticky positioning
+        let parent = pricingSection.parentElement;
+        let depth = 0;
+        while (parent && depth < 5) {
+          parent.style.overflow = 'visible';
+          parent.style.minHeight = 'auto';
+          parent.style.height = 'auto';
+          
+          // Only change position if it's sticky or fixed
+          const position = window.getComputedStyle(parent).position;
+          if (position === 'sticky' || position === 'fixed') {
+            parent.style.position = 'relative';
+            console.log('✅ Removed sticky/fixed from parent');
+          }
+          
+          parent = parent.parentElement;
+          depth++;
+        }
+        console.log('✅ Removed parent overflow restrictions');
+        
+      } else {
+        console.log('⚠️ Pricing section not found');
+      }
+      
+    } catch (error) {
+      console.error('❌ Pricing alignment fix error:', error);
+    }
+  }
+  
+  // Run on page load
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fixPricingAlignment);
+  } else {
+    fixPricingAlignment();
+  }
+  
+  // Run again after delays to catch React renders
+  setTimeout(fixPricingAlignment, 1000);
+  setTimeout(fixPricingAlignment, 2000);
+  setTimeout(fixPricingAlignment, 3000);
+  setTimeout(fixPricingAlignment, 4000);
+  
+  console.log('✅ Pricing alignment fix active');
+})();
+
+/* ========================================
+   OVERRIDE LANDING PAGE TEXT - ASE TECHNOLOGIES
+   PERSISTENT VERSION - Never stops watching
+   ======================================== */
+(function() {
+  console.log('🔧 ASE Technologies Text Override - PERSISTENT MODE');
+  
+  let replaceCount = 0;
+  let lastReplaceTime = 0;
+  const THROTTLE_MS = 50; // Throttle to every 50ms max
+  
+  function replaceText() {
+    const now = Date.now();
+    
+    // Throttle to prevent performance issues
+    if (now - lastReplaceTime < THROTTLE_MS) {
+      return;
+    }
+    lastReplaceTime = now;
+    
+    try {
+      const allElements = document.querySelectorAll('*');
+      let replaced = 0;
+      
+      allElements.forEach(el => {
+        for (let node of el.childNodes) {
+          if (node.nodeType === 3) { // Text node
+            let text = node.textContent;
+            let changed = false;
+            
+            if (text.includes('The #1')) {
+              text = text.replace(/The #1/g, 'Professional');
+              changed = true;
+            }
+            
+            if (text.includes('WhatsApp Automation')) {
+              text = text.replace(/WhatsApp Automation/g, 'WhatsApp CRM');
+              changed = true;
+            }
+            
+            if (text.includes('growth platform')) {
+              text = text.replace(/growth platform/g, 'by ASE Technologies');
+              changed = true;
+            }
+            
+            if (text.includes('Get started free')) {
+              text = text.replace(/Get started free/g, 'Get Started');
+              changed = true;
+            }
+            
+            if (changed) {
+              node.textContent = text;
+              replaced++;
+            }
+          }
+        }
+      });
+      
+      if (replaced > 0) {
+        replaceCount++;
+        console.log(`✅ ASE Tech [${replaceCount}]: Replaced ${replaced} text node(s)`);
+      }
+      
+    } catch (error) {
+      console.error('❌ Text replacement error:', error);
+    }
+  }
+  
+  // Run immediately
+  replaceText();
+  
+  // Run on DOMContentLoaded
+  document.addEventListener('DOMContentLoaded', replaceText);
+  
+  // Run frequently during initial page load
+  setTimeout(replaceText, 50);
+  setTimeout(replaceText, 100);
+  setTimeout(replaceText, 200);
+  setTimeout(replaceText, 300);
+  setTimeout(replaceText, 500);
+  setTimeout(replaceText, 1000);
+  setTimeout(replaceText, 1500);
+  setTimeout(replaceText, 2000);
+  setTimeout(replaceText, 3000);
+  
+  // PERSISTENT WATCHER - Never stops!
+  if (document.body) {
+    const observer = new MutationObserver(() => {
+      replaceText();
+    });
+    
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true // Also watch text content changes
+    });
+    
+    console.log('✅ PERSISTENT text watcher active (never stops)');
+  } else {
+    // If body not ready, wait and try again
+    setTimeout(() => {
+      if (document.body) {
+        const observer = new MutationObserver(() => {
+          replaceText();
+        });
+        
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true,
+          characterData: true
+        });
+        
+        console.log('✅ PERSISTENT text watcher active (delayed start)');
+      }
+    }, 100);
+  }
+  
+  // Also run on visibility change (when tab becomes active)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      replaceText();
+      console.log('✅ Tab active - re-checking text');
+    }
+  });
+  
+  console.log('✅ ASE Technologies PERSISTENT override loaded');
+})();
+</script>
 
 <!-- FIX: Populate "From" dropdown in Start New Conversation with PHONE NUMBER (not ID) -->
 <script>
@@ -375,6 +982,8 @@ body:not([data-theme="dark"]) {
   // Function to fetch and populate Meta API phone numbers
   async function populateFromDropdown() {
     try {
+      console.log('🔍 Looking for Start New Conversation dialog...');
+      
       // Get user token from localStorage
       let token = localStorage.getItem('wacrm_user');
       
@@ -391,11 +1000,11 @@ body:not([data-theme="dark"]) {
         }
       } catch (e) {
         // Token is already a string (JWT token), use it directly
-        console.log('✅ Using token directly from localStorage');
       }
       
       // Fetch Meta API keys (use cache if available)
       if (!metaKeysCache) {
+        console.log('📡 Fetching Meta API keys...');
         const response = await fetch('/api/user/get_meta_keys', {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -404,124 +1013,144 @@ body:not([data-theme="dark"]) {
         });
         
         if (!response.ok) {
-          console.error('❌ Failed to fetch meta keys');
+          console.error('❌ Failed to fetch meta keys:', response.status);
           return;
         }
         
         const data = await response.json();
+        console.log('📦 API Response:', data);
         
         if (!data.success || !data.data) {
-          console.error('❌ Invalid meta keys response');
+          console.error('❌ Invalid meta keys response:', data);
           return;
         }
         
         metaKeysCache = Array.isArray(data.data) ? data.data : [data.data];
-        console.log('✅ Meta keys loaded:', metaKeysCache);
+        console.log('✅ Meta keys cached:', metaKeysCache);
       }
       
-      // Find all dropdowns in the Start New Conversation dialog
-      const selectors = [
-        'select',
-        'div[role="combobox"]',
-        'input[type="hidden"]'
-      ];
+      // Find the Start New Conversation dialog
+      const dialogs = document.querySelectorAll('[role="dialog"], .MuiDialog-root');
+      console.log(`🔍 Found ${dialogs.length} dialog(s)`);
       
-      let foundDropdown = false;
-      
-      for (const selector of selectors) {
-        const elements = document.querySelectorAll(selector);
+      for (const dialog of dialogs) {
+        const dialogText = dialog.textContent || '';
         
-        for (const element of elements) {
-          // Check if this is inside the Start New Conversation dialog
-          const dialog = element.closest('[role="dialog"], .MuiDialog-root, [class*="modal"], [class*="Modal"]');
+        // Check if this is the Start New Conversation dialog
+        if (!dialogText.includes('Start New Conversation') && 
+            !dialogText.includes('From') &&
+            !dialogText.includes('To (number)')) {
+          continue;
+        }
+        
+        console.log('✅ Found Start New Conversation dialog!');
+        console.log('🔍 Dialog HTML:', dialog.innerHTML.substring(0, 500));
+        
+        // Debug: Show all input elements
+        const allInputs = dialog.querySelectorAll('input, select, textarea, [role="combobox"], [role="button"]');
+        console.log(`🔍 Found ${allInputs.length} input/select elements in dialog`);
+        allInputs.forEach((el, i) => {
+          console.log(`  ${i+1}. ${el.tagName} ${el.type || ''} ${el.name || ''} ${el.placeholder || ''} ${el.getAttribute('role') || ''}`);
+        });
+        
+        // Method 1: Try to find and populate regular SELECT element
+        const selects = dialog.querySelectorAll('select');
+        console.log(`📝 Found ${selects.length} select element(s)`);
+        
+        for (const select of selects) {
+          console.log('📝 Populating SELECT dropdown...');
           
-          if (!dialog) continue;
+          // Clear existing options
+          select.innerHTML = '';
           
-          // Check if dialog contains "From" label or "Start New Conversation"
-          const dialogText = dialog.textContent || '';
-          const hasConversation = dialogText.toLowerCase().includes('conversation');
-          const hasFrom = dialogText.toLowerCase().includes('from');
+          // Add default option
+          const defaultOpt = document.createElement('option');
+          defaultOpt.value = '';
+          defaultOpt.textContent = '-- Select WhatsApp Number --';
+          select.appendChild(defaultOpt);
           
-          if (!hasConversation && !hasFrom) continue;
+          // Add phone number options
+          metaKeysCache.forEach((item, index) => {
+            const option = document.createElement('option');
+            option.value = item.business_phone_number_id;
+            option.textContent = item.display_phone_number || `WhatsApp ${index + 1}`;
+            option.dataset.phoneNumberId = item.business_phone_number_id;
+            select.appendChild(option);
+            console.log(`✅ Added: ${option.textContent} (value: ${option.value})`);
+          });
           
-          console.log('📝 Found dialog with conversation/from:', element.tagName);
+          select.selectedIndex = 0;
           
-          // Handle regular SELECT element
-          if (element.tagName === 'SELECT') {
-            console.log('📝 Populating SELECT element');
-            
-            // Clear existing options
-            element.innerHTML = '';
-            
-            // Add a default option
-            const defaultOption = document.createElement('option');
-            defaultOption.value = '';
-            defaultOption.textContent = '-- Select WhatsApp Number --';
-            element.appendChild(defaultOption);
-            
-            // Add options for each Meta API key
-            metaKeysCache.forEach((item) => {
-              const option = document.createElement('option');
-              
-              // VALUE should be the business_phone_number_id (for API calls)
-              option.value = item.business_phone_number_id;
-              
-              // TEXT should be the display_phone_number (what user sees)
-              option.textContent = item.display_phone_number || `+${item.business_phone_number_id}`;
-              
-              // Store both values in dataset for later use
-              option.dataset.phoneNumberId = item.business_phone_number_id;
-              option.dataset.displayNumber = item.display_phone_number;
-              
-              element.appendChild(option);
-              
-              console.log('✅ Added option:', option.textContent, '(ID:', option.value, ')');
-            });
-            
-            // Don't auto-select - let user choose
-            element.selectedIndex = 0; // Select the default "-- Select --" option
-            
-            foundDropdown = true;
-          }
+          // Trigger change event
+          select.dispatchEvent(new Event('change', { bubbles: true }));
           
-          // Handle Material-UI combobox (display text)
-          else if (element.getAttribute('role') === 'combobox') {
-            console.log('📝 Found MUI combobox, updating display text');
-            
-            // Find the parent MuiSelect container
-            const selectRoot = element.closest('[class*="MuiSelect"], [class*="MuiInput"]');
-            if (!selectRoot) continue;
-            
-            // Don't set text immediately - leave it empty for user to select
-            element.textContent = ''; // Clear the displayed ID
-            element.setAttribute('aria-label', 'Select WhatsApp Number');
-            
-            // Try to find and populate the actual hidden select/input
-            const hiddenInput = selectRoot.querySelector('input[type="hidden"], input[name="from"], input[name="From"]');
-            if (hiddenInput) {
-              hiddenInput.value = ''; // Clear auto-selected value
-              console.log('✅ Cleared hidden input value');
-            }
-            
-            foundDropdown = true;
-          }
+          return; // Success!
+        }
+        
+        // Method 2: Try Material-UI Select (click to open menu, then populate)
+        const muiSelects = dialog.querySelectorAll('[class*="MuiSelect"], [role="button"]');
+        console.log(`📝 Found ${muiSelects.length} MUI select(s)`);
+        
+        for (const muiSelect of muiSelects) {
+          const parent = muiSelect.closest('[class*="Input"]');
+          if (!parent) continue;
           
-          // Handle hidden input
-          else if (element.type === 'hidden') {
-            const name = element.name || '';
-            if (name.toLowerCase() === 'from') {
-              console.log('📝 Found hidden FROM input, clearing value');
-              element.value = ''; // Clear auto-selected value
-              foundDropdown = true;
-            }
+          const label = parent.querySelector('label');
+          if (label && label.textContent.includes('From')) {
+            console.log('📝 Found MUI "From" select, attempting to populate...');
+            
+            // Click to open the menu
+            muiSelect.click();
+            
+            // Wait for menu to appear
+            setTimeout(() => {
+              // Find the menu that just appeared
+              const menu = document.querySelector('[role="listbox"], [class*="MuiMenu-list"]');
+              if (menu) {
+                console.log('✅ Menu opened, clearing and adding options...');
+                
+                // Clear menu
+                menu.innerHTML = '';
+                
+                // Add options
+                metaKeysCache.forEach((item) => {
+                  const menuItem = document.createElement('li');
+                  menuItem.setAttribute('role', 'option');
+                  menuItem.className = 'MuiMenuItem-root';
+                  menuItem.textContent = item.display_phone_number || item.business_phone_number_id;
+                  menuItem.dataset.value = item.business_phone_number_id;
+                  menuItem.style.padding = '6px 16px';
+                  menuItem.style.cursor = 'pointer';
+                  
+                  menuItem.onclick = function() {
+                    // Set the value
+                    const hiddenInput = parent.querySelector('input');
+                    if (hiddenInput) {
+                      hiddenInput.value = item.business_phone_number_id;
+                    }
+                    
+                    // Update display
+                    const displayDiv = muiSelect.querySelector('[role="combobox"]') || muiSelect;
+                    displayDiv.textContent = item.display_phone_number;
+                    
+                    // Close menu
+                    const backdrop = document.querySelector('[class*="MuiBackdrop"]');
+                    if (backdrop) backdrop.click();
+                    
+                    console.log('✅ Selected:', item.display_phone_number);
+                  };
+                  
+                  menu.appendChild(menuItem);
+                  console.log(`✅ Added menu item: ${menuItem.textContent}`);
+                });
+              }
+            }, 200);
+            
+            return; // Success!
           }
         }
-      }
-      
-      if (foundDropdown) {
-        console.log('✅ Successfully configured "From" dropdown - user can now select');
-      } else {
-        console.log('⚠️ No dropdown found in dialog');
+        
+        console.log('⚠️ Could not find FROM dropdown to populate');
       }
       
     } catch (error) {
@@ -1116,7 +1745,17 @@ body:not([data-theme="dark"]) {
   
   console.log('✅ Phonebook fix initialized');
 })();
-</script></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div></body></html>
+</script></head><body>
+
+<!-- LOADING SCREEN FALLBACK - Loads immediately -->
+<!-- TEMPORARILY DISABLED FOR TESTING -->
+<!-- <script src="/loading-screen-fallback.js?v=1.0"></script> -->
+
+<!-- FIX: Ngrok compatibility (must load first) -->
+<!-- TEMPORARILY DISABLED FOR TESTING -->
+<!-- <script src="/fix-ngrok-issues.js?v=1.0"></script> -->
+
+<noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div></body></html>
 
 
 <!-- ========================================
@@ -1818,3 +2457,143 @@ body:not([data-theme="dark"]) {
   console.log('✅ WhatsApp Forms Bulk Send ready');
 })();
 </script>
+
+
+<!-- ========================================
+     ALL CUSTOM SCRIPTS TEMPORARILY DISABLED
+     TO ISOLATE PAGE UNRESPONSIVE ISSUE
+     ======================================== -->
+
+<!-- Load the dropdown fix script - Direct API mode (bypasses Socket.IO) -->
+<!-- FIX: WhatsApp Forms dropdowns (load FIRST to prevent interference) -->
+<!-- <script src="/fix-wa-forms-dropdowns.js?v=3.0"></script> -->
+
+<!-- FIX: WA Forms click protection (V3.6 - Enhanced field edit protection) -->
+<!-- <script src="/fix-wa-forms-clicks.js?v=3.6"></script> -->
+
+<!-- FIX: WA Forms edit close issue (V1.0 - Super aggressive protection) -->
+<!-- <script src="/fix-wa-forms-edit-close.js?v=1.0"></script> -->
+
+<!-- FIX: WA Forms delete issue (V1.0 - Monitor and fix delete operations) -->
+<!-- <script src="/fix-wa-forms-delete.js?v=1.0"></script> -->
+
+<!-- FIX: WA Forms delete AGGRESSIVE (V1.0 - Force API completion) -->
+<!-- <script src="/fix-wa-forms-delete-aggressive.js?v=1.0"></script> -->
+
+<!-- CUSTOMIZE: Loading screen animation and text (V1.1 - Custom logo support) -->
+<!-- <script src="/customize-loading-screen.js?v=1.1"></script> -->
+
+<!-- DEBUG: WA Forms (temporary - for diagnostics) -->
+<script src="/debug-wa-forms.js"></script>
+
+<!-- FIX: SMTP Configuration Form - Auto-populate after refresh -->
+<script src="/fix-smtp-form.js?v=1.2"></script>
+
+<!-- FIX: SMTP Form Submission - Fix field mapping -->
+<script src="/fix-smtp-submit.js?v=1.0"></script>
+
+<!-- DEBUG: Admin authentication (for diagnostics) -->
+<script src="/debug-admin-auth.js"></script>
+
+<!-- DEBUG: SMTP Frontend Check (for diagnostics) -->
+<script src="/check-smtp-frontend.js"></script>
+
+<script src="/fix-start-conversation-bypass-socket.js?v=2.0"></script>
+
+<!-- REDIRECT SCRIPT REMOVED - Using original React dialog -->
+
+<!-- Enhanced fix with better debugging (for testing) -->
+<!-- <script src="/fix-start-conversation-enhanced.js?v=3.0"></script> -->
+
+<!-- Fix phonebook dropdown in campaigns -->
+<script src="/fix-phonebook-dropdown.js"></script>
+
+<!-- Fix scrolling issues -->
+<link rel="stylesheet" href="/fix-scrolling.css" />
+
+<!-- Socket.IO Client - REQUIRED for QR code display -->
+<script src="/socket.io/socket.io.js"></script>
+
+<!-- Fix Socket.IO conflicts FIRST -->
+<script src="/fix-socket-conflict.js?v=2.1"></script>
+
+<!-- OLD SCRIPTS - DISABLED (replaced with inline fixes above) -->
+<!--
+<script src="/force-qr-display.js?v=1.1"></script>
+<script src="/fix-wa-qr-connect.js?v=1.0"></script>
+<script src="/fix-qr-display.js?v=1.0"></script>
+<script src="/ultra-simple-logo-replace.js?v=3.0"></script>
+-->
+
+<!-- Force logo replacement with CSS - COMPREHENSIVE -->
+<style id="force-custom-logo">
+  /* Target ALL possible logo locations */
+  header a[href="/"] img,
+  header a[href="/"] svg,
+  header img[alt*="logo" i],
+  header img[alt*="WhatsCRM" i],
+  nav a[href="/"] img,
+  nav a[href="/"] svg {
+    display: none !important;
+  }
+  
+  /* Hide WhatsCRM text in header */
+  header a[href="/"],
+  nav a[href="/"] {
+    font-size: 0 !important;
+    line-height: 0 !important;
+  }
+  
+  /* Add custom logo as :before pseudo-element */
+  header a[href="/"]::before,
+  nav a[href="/"]::before {
+    content: '' !important;
+    display: inline-block !important;
+    background-image: url('/assets/ase_logo.png') !important;
+    background-size: contain !important;
+    background-repeat: no-repeat !important;
+    background-position: center left !important;
+    width: 180px !important;
+    height: 45px !important;
+    font-size: 16px !important;
+    line-height: normal !important;
+  }
+  
+  /* Alternative: Direct background on link */
+  header > a:first-child,
+  header > div:first-child > a {
+    background-image: url('/assets/ase_logo.png') !important;
+    background-size: contain !important;
+    background-repeat: no-repeat !important;
+    background-position: center left !important;
+    min-width: 180px !important;
+    height: 45px !important;
+  }
+  
+  /* FIX: Ensure navigation buttons are clickable */
+  nav,
+  nav *,
+  header,
+  header *,
+  nav a,
+  header a,
+  nav button,
+  header button {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+  }
+  
+  /* Ensure nav links have proper z-index */
+  nav a[href*="Features"],
+  nav a[href*="Pricing"],
+  nav a[href*="Testimonials"],
+  header a:not([href="/"]) {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+    position: relative !important;
+    z-index: 1000 !important;
+  }
+</style>
+
+</body>
+</html>

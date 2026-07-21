@@ -1823,7 +1823,10 @@ router.post("/send_resovery", async (req, res) => {
   try {
     const { email } = req.body;
 
+    console.log('🔐 Password reset requested for:', email);
+
     if (!isValidEmail(email)) {
+      console.log('❌ Invalid email format');
       return res.json({ msg: "Please enter a valid email" });
     }
 
@@ -1831,14 +1834,17 @@ router.post("/send_resovery", async (req, res) => {
       email,
     ]);
     if (checkEmailValid.length < 1) {
+      console.log('⚠️ Email not found in database (security response sent)');
       return res.json({
         success: true,
         msg: "We have sent a recovery link if this email is associated with user account.",
       });
     }
 
+    console.log('✅ User found:', checkEmailValid[0].uid);
+
     const getWeb = await query(`SELECT * FROM web_public`, []);
-    const appName = getWeb[0]?.app_name;
+    const appName = getWeb[0]?.app_name || 'WhatsCRM';
 
     const jsontoken = sign(
       {
@@ -1854,10 +1860,22 @@ router.post("/send_resovery", async (req, res) => {
 
     const recpveryUrl = `${process.env.FRONTENDURI}/recovery-user/${jsontoken}`;
 
+    console.log('📧 Recovery URL generated');
+
     const getHtml = recoverEmail(appName, recpveryUrl);
 
     // getting smtp
     const smtp = await query(`SELECT * FROM smtp`, []);
+    
+    console.log('📊 SMTP config check:', {
+      found: smtp.length > 0,
+      email: smtp[0]?.email ? '✓' : '✗',
+      host: smtp[0]?.host ? '✓' : '✗',
+      port: smtp[0]?.port ? '✓' : '✗',
+      username: smtp[0]?.username ? '✓' : '✗',
+      password: smtp[0]?.password ? '✓' : '✗'
+    });
+    
     if (
       !smtp[0]?.email ||
       !smtp[0]?.host ||
@@ -1865,13 +1883,20 @@ router.post("/send_resovery", async (req, res) => {
       !smtp[0]?.password ||
       !smtp[0]?.username
     ) {
+      console.log('❌ SMTP configuration incomplete!');
       return res.json({
         success: false,
         msg: "SMTP connections not found! Unable to send recovery link",
       });
     }
 
-    await sendEmail(
+    console.log('📤 Sending recovery email...');
+    console.log('   From:', smtp[0]?.email);
+    console.log('   To:', email);
+    console.log('   Host:', smtp[0]?.host);
+    console.log('   Port:', smtp[0]?.port);
+
+    const emailResult = await sendEmail(
       smtp[0]?.host,
       smtp[0]?.port,
       smtp[0]?.email,
@@ -1883,13 +1908,26 @@ router.post("/send_resovery", async (req, res) => {
       smtp[0]?.username,
     );
 
+    console.log('📬 Email send result:', emailResult);
+
+    if (!emailResult.success) {
+      console.error('❌ Email failed to send:', emailResult.err);
+      return res.json({
+        success: false,
+        msg: "Failed to send recovery email. Please contact administrator.",
+        error: emailResult.err
+      });
+    }
+
+    console.log('✅ Recovery email sent successfully!');
+
     res.json({
       success: true,
       msg: "We have sent your a password recovery link. Please check your email",
     });
   } catch (err) {
-    console.log(err);
-    res.json({ msg: "Something went wrong", err, success: false });
+    console.error('❌ Password reset error:', err);
+    res.json({ msg: "Something went wrong", err: err.message || err.toString(), success: false });
   }
 });
 
@@ -3637,6 +3675,52 @@ router.post("/delete_chat_tag", validateUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.json({ success: false });
+  }
+});
+
+// Fix meta_api UID mismatch - for dropdown issue
+router.post("/fix_meta_api_uid", validateUser, async (req, res) => {
+  try {
+    const { uid, display_phone_number, business_phone_number_id } = req.body;
+
+    if (!uid || !display_phone_number || !business_phone_number_id) {
+      return res.json({
+        success: false,
+        msg: "Missing required parameters",
+      });
+    }
+
+    // Verify the UID matches the logged-in user
+    if (uid !== req.decode.uid) {
+      return res.json({
+        success: false,
+        msg: "UID mismatch - security check failed",
+      });
+    }
+
+    // Update the meta_api record
+    const result = await query(
+      `UPDATE meta_api 
+       SET uid = ?, display_phone_number = ? 
+       WHERE business_phone_number_id = ?`,
+      [uid, display_phone_number, business_phone_number_id],
+    );
+
+    if (result.affectedRows > 0) {
+      res.json({
+        success: true,
+        msg: "meta_api updated successfully",
+        affectedRows: result.affectedRows,
+      });
+    } else {
+      res.json({
+        success: false,
+        msg: "No records updated. Check if business_phone_number_id exists.",
+      });
+    }
+  } catch (err) {
+    res.json({ success: false, msg: "something went wrong", err });
+    console.log(err);
   }
 });
 

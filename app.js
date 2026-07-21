@@ -92,7 +92,22 @@ app.get("*", function (request, response) {
 const server = app.listen(process.env.PORT || 3010, () => {
   console.log(`WaCrm server is running on port ${process.env.PORT}`);
   updateLangJsonFromEnglish();
-  // init(); // QR code initialization - uncomment if using QR mode
+  
+  // ─── Socket.IO MUST be initialized BEFORE QR module ──────────────────────────
+  const { initializeSocket } = require("./socket");
+  const io = initializeSocket(server);
+  
+  console.log("🔍 DEBUG: io type =", typeof io);
+  console.log("🔍 DEBUG: io exists =", !!io);
+  
+  // ─── Connect QR Module to Socket.IO ───────────────────────────────────────────
+  const qrModule = require("./helper/addon/qr");
+  qrModule.setSocketIO(io);
+  console.log("✅ QR Module connected to Socket.IO");
+  
+  // ─── NOW initialize QR sessions (AFTER Socket.IO is connected) ────────────────
+  init(); // ✅ QR code initialization - ENABLED for QR WhatsApp
+  
   setTimeout(() => {
     // warmerLoopInit(); // Uncomment if using phone number warmer
     initCampaign(); // ✅ ENABLED - Process campaigns
@@ -100,9 +115,8 @@ const server = app.listen(process.env.PORT || 3010, () => {
   }, 1000);
 });
 
-// ─── Socket.IO ────────────────────────────────────────────────────────────────
-const io = require("./socket").initializeSocket(server);
-module.exports = io;
+// Export io for other modules
+module.exports = server;
 
 // ─── Cleanup ──────────────────────────────────────────────────────────────────
 nodeCleanup(async (exitCode, signal) => {

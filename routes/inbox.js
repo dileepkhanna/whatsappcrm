@@ -2,6 +2,8 @@ const router = require("express").Router();
 const { query } = require("../database/dbpromise.js");
 const randomstring = require("randomstring");
 const bcrypt = require("bcrypt");
+const fs = require("fs");
+const path = require("path");
 const {
   isValidEmail,
   getFileExtension,

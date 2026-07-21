@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>QR WhatsApp - Working Test</title>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #fff;
+    }
+    .container {
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 15px;
+      padding: 30px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+      color: #333;
+    }
+    h1 {
+      color: #667eea;
+      margin-bottom: 10px;
+    }
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+    }
+    .status {
+      padding: 15px;
+      margin: 15px 0;
+      border-radius: 8px;
+      font-weight: 500;
+    }
+    .status.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .status.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .status.info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+    .status.warning { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+    
+    input {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      margin: 10px 0;
+      box-sizing: border-box;
+    }
+    input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 15px 30px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      margin: 10px 5px;
+      transition: transform 0.2s;
+    }
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    }
+    button:active {
+      transform: translateY(0);
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+      transform: none;
+    }
+    #qr-display {
+      margin-top: 30px;
+      padding: 30px;
+      background: white;
+      border-radius: 12px;
+      text-align: center;
+      min-height: 400px;
+      display: none;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+    }
+    #qr-display.active {
+      display: block;
+    }
+    #qr-display img {
+      max-width: 300px;
+      border: 5px solid #667eea;
+      border-radius: 12px;
+      padding: 15px;
+      background: white;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+    }
+    .log-area {
+      background: #1e1e1e;
+      color: #0f0;
+      padding: 15px;
+      border-radius: 8px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      margin-top: 20px;
+    }
+    .log-entry {
+      margin: 5px 0;
+      padding: 5px;
+      border-left: 3px solid #0f0;
+      padding-left: 10px;
+    }
+    .log-entry.error { color: #f44336; border-left-color: #f44336; }
+    .log-entry.success { color: #4CAF50; border-left-color: #4CAF50; }
+    .log-entry.info { color: #2196F3; border-left-color: #2196F3; }
+    .log-entry.warning { color: #ff9800; border-left-color: #ff9800; }
+    
+    .step {
+      background: #f8f9fa;
+      padding: 15px;
+      margin: 10px 0;
+      border-radius: 8px;
+      border-left: 4px solid #667eea;
+    }
+    .step-number {
+      display: inline-block;
+      width: 30px;
+      height: 30px;
+      background: #667eea;
+      color: white;
+      border-radius: 50%;
+      text-align: center;
+      line-height: 30px;
+      font-weight: bold;
+      margin-right: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔥 WhatsApp QR Code Generator</h1>
+    <p class="subtitle">Complete Working Test - Baileys Implementation</p>
+    
+    <div id="status-checks">
+      <div class="step">
+        <span class="step-number">1</span>
+        <strong>Check Authentication</strong>
+        <div id="auth-status" class="status info">Checking...</div>
+      </div>
+      
+      <div class="step">
+        <span class="step-number">2</span>
+        <strong>Connect Socket.IO</strong>
+        <div id="socket-status" class="status info">Not connected</div>
+        <button onclick="connectSocket()" id="connect-btn">Connect</button>
+      </div>
+      
+      <div class="step">
+        <span class="step-number">3</span>
+        <strong>Generate QR Code</strong>
+        <input type="text" id="instance-name" placeholder="Enter instance name (e.g., MyWhatsApp)" />
+        <button onclick="generateQR()" id="generate-btn" disabled>Generate QR Code</button>
+      </div>
+    </div>
+    
+    <div id="qr-display">
+      <h2>✅ Your QR Code is Ready!</h2>
+      <p>Scan this with your WhatsApp mobile app</p>
+      <div id="qr-image"></div>
+      <div id="qr-timer" style="margin-top: 20px; font-size: 14px; color: #666;"></div>
+    </div>
+    
+    <div class="log-area" id="logs"></div>
+  </div>
+  
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    let socket = null;
+    let qrTimeout = null;
+    
+    function log(message, type = 'info') {
+      const logArea = document.getElementById('logs');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry ' + type;
+      const time = new Date().toLocaleTimeString();
+      entry.textContent = `[${time}] ${message}`;
+      logArea.appendChild(entry);
+      logArea.scrollTop = logArea.scrollHeight;
+      console.log(message);
+    }
+    
+    function updateStatus(elementId, message, type) {
+      const element = document.getElementById(elementId);
+      element.textContent = message;
+      element.className = 'status ' + type;
+    }
+    
+    // Check authentication on load
+    window.addEventListener('load', () => {
+      log('🚀 Page loaded', 'success');
+      
+      const token = localStorage.getItem('wacrm_user');
+      if (token) {
+        log('✅ Auth token found', 'success');
+        updateStatus('auth-status', '✅ Authenticated', 'success');
+      } else {
+        log('❌ No auth token found', 'error');
+        updateStatus('auth-status', '❌ Not logged in - Please login to WhatsCRM first!', 'error');
+      }
+    });
+    
+    function connectSocket() {
+      log('🔌 Connecting to Socket.IO...', 'info');
+      
+      const token = localStorage.getItem('wacrm_user');
+      if (!token) {
+        log('❌ Cannot connect - no auth token', 'error');
+        updateStatus('socket-status', '❌ Login required', 'error');
+        return;
+      }
+      
+      try {
+        socket = io({
+          query: { token }
+        });
+        
+        socket.on('connect', () => {
+          log('✅ Socket.IO connected! ID: ' + socket.id, 'success');
+          updateStatus('socket-status', '✅ Connected (ID: ' + socket.id + ')', 'success');
+          document.getElementById('generate-btn').disabled = false;
+          document.getElementById('connect-btn').disabled = true;
+        });
+        
+        socket.on('connect_error', (error) => {
+          log('❌ Connection error: ' + error.message, 'error');
+          updateStatus('socket-status', '❌ Connection failed', 'error');
+        });
+        
+        socket.on('connection_ack', (data) => {
+          log('📨 Server acknowledged: ' + JSON.stringify(data), 'success');
+        });
+        
+        socket.on('disconnect', (reason) => {
+          log('⚠️ Disconnected: ' + reason, 'warning');
+          updateStatus('socket-status', '⚠️ Disconnected', 'warning');
+          document.getElementById('generate-btn').disabled = true;
+          document.getElementById('connect-btn').disabled = false;
+        });
+        
+        // Listen for QR codes - BOTH events
+        socket.on('qr', handleQRCode);
+        socket.on('qrcode', handleQRCode);
+        
+      } catch (error) {
+        log('❌ Error creating socket: ' + error.message, 'error');
+        updateStatus('socket-status', '❌ Error: ' + error.message, 'error');
+      }
+    }
+    
+    function handleQRCode(data) {
+      log('📱 QR CODE RECEIVED!', 'success');
+      log('   Session: ' + data.sessionId, 'info');
+      log('   QR length: ' + data.qr.length + ' chars', 'info');
+      
+      // Clear any existing timeout
+      if (qrTimeout) {
+        clearTimeout(qrTimeout);
+      }
+      
+      // Display QR code
+      const qrDisplay = document.getElementById('qr-display');
+      const qrImage = document.getElementById('qr-image');
+      const qrTimer = document.getElementById('qr-timer');
+      
+      qrImage.innerHTML = '<img src="' + data.qr + '" alt="QR Code" />';
+      qrDisplay.classList.add('active');
+      
+      // Start 60 second countdown
+      let secondsLeft = 60;
+      qrTimer.textContent = 'This QR code will expire in ' + secondsLeft + ' seconds. A new one will be generated automatically.';
+      
+      const countdown = setInterval(() => {
+        secondsLeft--;
+        if (secondsLeft > 0) {
+          qrTimer.textContent = 'This QR code will expire in ' + secondsLeft + ' seconds. A new one will be generated automatically.';
+        } else {
+          clearInterval(countdown);
+          qrTimer.textContent = 'Waiting for new QR code...';
+        }
+      }, 1000);
+      
+      log('🎉 QR Code displayed successfully!', 'success');
+    }
+    
+    async function generateQR() {
+      const instanceName = document.getElementById('instance-name').value.trim();
+      
+      if (!instanceName) {
+        alert('Please enter an instance name!');
+        document.getElementById('instance-name').focus();
+        return;
+      }
+      
+      if (!socket || !socket.connected) {
+        alert('Socket not connected! Click Connect first.');
+        return;
+      }
+      
+      log('🚀 Requesting QR generation for: ' + instanceName, 'info');
+      
+      try {
+        const token = localStorage.getItem('wacrm_user');
+        const uniqueId = 'rthz8Dmk8B9HeQp6vt6YFQy9482PfCy4_' + instanceName;
+        
+        log('📡 API Request: /api/qr/create?id=' + uniqueId, 'info');
+        
+        const response = await fetch('/api/qr/create?id=' + encodeURIComponent(uniqueId), {
+          method: 'GET',
+          headers: {
+            'Authorization': 'Bearer ' + token
+          }
+        });
+        
+        const result = await response.json();
+        log('📊 Server response: ' + JSON.stringify(result), result.success ? 'success' : 'error');
+        
+        if (result.success) {
+          log('✅ QR generation started!', 'success');
+          log('⏳ Waiting for QR code via Socket.IO (should appear in 5-10 seconds)...', 'info');
+          
+          // Setup session-specific listener
+          const sessionSpecificEvent = 'qr-' + uniqueId;
+          log('👂 Also listening on: ' + sessionSpecificEvent, 'info');
+          socket.on(sessionSpecificEvent, handleQRCode);
+          
+        } else {
+          log('❌ Server error: ' + result.msg, 'error');
+          alert('Error: ' + result.msg);
+        }
+        
+      } catch (error) {
+        log('❌ Request failed: ' + error.message, 'error');
+        alert('Error: ' + error.message);
+      }
+    }
+    
+    // Auto-focus instance name field
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        document.getElementById('instance-name').focus();
+      }, 500);
+    });
+  </script>
+</body>
+</html>

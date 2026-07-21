@@ -1663,15 +1663,36 @@ function sendMetaMsg(uid, msgObj, toNumber, savObj, chatId) {
           createdAt: new Date(),
         });
 
-        await query(
-          `UPDATE beta_chats SET last_message_came = ?, last_message = ?, is_opened = ? WHERE chat_id = ?`,
-          [userTimezone, JSON.stringify(finalSaveMsg), 1, chatId],
+        // Check if chat exists, if not create it
+        const [existingChat] = await query(
+          `SELECT * FROM beta_chats WHERE chat_id = ? AND uid = ?`,
+          [chatId, uid]
         );
 
-        await query(`UPDATE beta_chats SET is_opened = ? WHERE chat_id = ?`, [
-          1,
-          chatId,
-        ]);
+        if (existingChat) {
+          // Update existing chat
+          await query(
+            `UPDATE beta_chats SET last_message_came = ?, last_message = ?, is_opened = ?, updatedAt = NOW() WHERE chat_id = ?`,
+            [userTimezone, JSON.stringify(finalSaveMsg), 1, chatId],
+          );
+        } else {
+          // Create new chat
+          await query(`INSERT INTO beta_chats SET ?`, {
+            chat_id: chatId,
+            uid: uid,
+            sender_name: finalSaveMsg.senderName,
+            sender_mobile: finalSaveMsg.senderMobile,
+            last_message: JSON.stringify(finalSaveMsg),
+            last_message_came: userTimezone,
+            unread_count: 0,
+            is_opened: 1,
+            origin: 'meta',
+            origin_instance_id: JSON.stringify({ id: getMeta[0]?.display_phone_number || waNumId }),
+            assigned_agent: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
       }
 
       resolve({ success: true });
@@ -2179,9 +2200,12 @@ async function sendEmailBeta(config) {
 }
 
 function sendEmail(host, port, email, pass, html, subject, from, to, username) {
+  // Convert port to number if it's a string
+  const portNum = typeof port === 'string' ? parseInt(port) : port;
+  
   console.log({
     host,
-    port,
+    port: portNum,
     email,
     pass,
   });
@@ -2189,8 +2213,8 @@ function sendEmail(host, port, email, pass, html, subject, from, to, username) {
     try {
       let transporter = nodemailer.createTransport({
         host: host,
-        port: port,
-        secure: port === "465" ? true : false, // true for 465, false for other ports
+        port: portNum,
+        secure: portNum === 465 ? true : false, // true for 465, false for other ports
         auth: {
           user: username || email, // generated ethereal user
           pass: pass, // generated ethereal password
@@ -2209,6 +2233,7 @@ function sendEmail(host, port, email, pass, html, subject, from, to, username) {
 
       resolve({ success: true, info });
     } catch (err) {
+      console.error('❌ Email send error:', err);
       resolve({ success: false, err: err.toString() || "Invalid Email" });
     }
   });

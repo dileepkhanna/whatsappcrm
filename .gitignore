@@ -20,7 +20,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-package-lock.json
+
+# Keep package-lock.json for production consistency
+# Uncomment below if you want to ignore it
+# package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
@@ -152,7 +155,7 @@ temp/
 *.temp
 .cache/
 
-# ─── SSL Certificates ────────────────────────────────────────
+# ─── SSL Certificates & SSH Keys ─────────────────────────────
 # NEVER commit private keys or certificates
 *.pem
 *.key
@@ -163,17 +166,47 @@ temp/
 ssl/
 certs/
 
+# AWS EC2 Key Pairs - CRITICAL!
+ec2.pem
+*.pem
+*-key-pair.pem
+*-keypair.pem
+aws-*.pem
+lightsail-*.pem
+
+# SSH Keys
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.ppk
+known_hosts
+
+# AWS Credentials
+.aws/
+*.aws/credentials
+.boto
+credentials.json
+service-account.json
+
+# Other cloud provider keys
+.gcp/
+.azure/
+
 # ─── Configuration Backups ───────────────────────────────────
 config.backup
 *.config.backup
 settings.backup
 
 # ─── WhatsApp Session Data ───────────────────────────────────
-# Baileys session files
+# Baileys session files - CRITICAL: Contains WhatsApp auth tokens
 *.session
 session-*/
 auth_info.json
 auth_info_baileys/
+auth_info_baileys/*
+creds.json
+!auth_info_baileys/.gitkeep
 
 # ─── MongoDB ─────────────────────────────────────────────────
 # MongoDB dump files
@@ -201,8 +234,35 @@ appendonly.aof
 # *.tar.gz
 # *.rar
 
+# ASE Technologies - Keep logo files
+!client/public/assets/ase_logo.png
+!client/public/media/ase_logo.png
+!client/public/favicon.ico
+!client/public/logo192.png
+!client/public/logo512.png
+!client/public/apple-touch-icon.png
+
+# ─── Database Migrations ─────────────────────────────────────
+# IMPORTANT: DO commit migration files - they are version controlled!
+# migrations/*.js  <- DO NOT IGNORE THESE
+# config/database.js  <- DO NOT IGNORE THIS
+
 # ─── Custom Exclusions ───────────────────────────────────────
-# Add project-specific files here
+# Test and helper scripts (after cleanup)
+test-*.js
+test-*.html
+test_*.js
+check-*.js
+check_*.sql
+fix-*.js
+fix_*.sql
+fix-*.html
+debug-*.js
+diagnose-*.js
+diagnose_*.sql
+*-test.js
+*-debug.js
+*-fix.js
 
 # Backup files from editors
 *.bak
@@ -215,11 +275,21 @@ appendonly.aof
 # Local development scripts
 local-*.sh
 local-*.bat
+restart-*.ps1
+!restart-server.ps1
 
 # Personal notes and TODOs
 TODO.md
 NOTES.md
 .todo
+
+# Cleanup summaries (optional - uncomment if you don't want to commit)
+# CLEANUP_SUMMARY.md
+
+# Old/backup documentation
+*_OLD.md
+*_BACKUP.md
+*.md.bak
 
 # ─── Keep These Files (Force Include) ────────────────────────
 # Use ! to force include important files even if parent folder is ignored
@@ -259,3 +329,20 @@ NOTES.md
 #    - Rotate all secrets immediately
 #    - Use git-filter-repo or BFG to clean history
 # ============================================================
+
+# ─── Kiro AI Assistant ───────────────────────────────────────
+# Kiro configuration and settings
+.kiro/
+.kiro/*
+!.kiro/.gitkeep
+
+# Keep steering files and specs if you want to version control them
+!.kiro/steering/
+!.kiro/specs/
+!.kiro/skills/
+
+# ============================================================
+# END OF .gitignore
+# Last updated: January 2025 (ASE Technologies WhatsApp CRM)
+# ============================================================
+

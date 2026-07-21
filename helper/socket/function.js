@@ -648,16 +648,8 @@ async function sendNewMessage({ sessionId, message, number }) {
 
     const jid = formatPhone(number);
 
-    const checkNumber = await isExists(session, jid, false);
-
-    console.log({ checkNumber: checkNumber, jid });
-
-    if (!checkNumber) {
-      return {
-        success: false,
-        msg: "This number is not found on WhatsApp",
-      };
-    }
+    // Number validation removed - send to any number
+    console.log(`📤 Sending via socket to ${jid} (no validation)`);
 
     const send = await timeoutPromise(session?.sendMessage(jid, msgObj), 60000);
     const msgId = send?.key?.id;

@@ -50,7 +50,7 @@ async function handleLegacyCampaigns() {
        LEFT JOIN beta_campaign_logs l ON c.campaign_id = l.campaign_id
        WHERE c.status IN ('PENDING', 'IN_PROGRESS')
        AND l.campaign_id IS NULL
-       AND (c.schedule IS NULL OR c.schedule = '')`,
+       AND (c.schedule IS NULL OR c.schedule = '' OR c.schedule = '0000-00-00 00:00:00')`,
       [],
     );
 

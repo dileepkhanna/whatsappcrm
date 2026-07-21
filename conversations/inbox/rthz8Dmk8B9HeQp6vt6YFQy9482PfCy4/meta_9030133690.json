@@ -1,0 +1,38 @@
+[
+  {
+    "type": "text",
+    "metaChatId": "wamid.HBgMOTE5MDMwMTMzNjkwFQIAERgSOTg1RUZFOEQyNDc5MzRFMDQwAA==",
+    "msgContext": {
+      "type": "text",
+      "text": {
+        "preview_url": true,
+        "body": "hi hello"
+      }
+    },
+    "reaction": "",
+    "timestamp": 1782126878,
+    "senderName": "9030133690",
+    "senderMobile": "9030133690",
+    "status": "sent",
+    "star": false,
+    "route": "OUTGOING"
+  },
+  {
+    "type": "text",
+    "metaChatId": "wamid.HBgMOTE5MDMwMTMzNjkwFQIAERgSODJEOEIwREY4OTQ4QURDQjUyAA==",
+    "msgContext": {
+      "type": "text",
+      "text": {
+        "preview_url": true,
+        "body": "hi hello"
+      }
+    },
+    "reaction": "",
+    "timestamp": 1782126909,
+    "senderName": "9030133690",
+    "senderMobile": "9030133690",
+    "status": "sent",
+    "star": false,
+    "route": "OUTGOING"
+  }
+]

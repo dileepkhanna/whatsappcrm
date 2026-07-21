@@ -839,13 +839,13 @@ router.post("/update_smtp", adminValidator, async (req, res) => {
     const getOne = await query(`SELECT * FROM smtp`, []);
     if (getOne.length < 1) {
       await query(
-        `INSERT INTO smtp (email, host, port, password, username) VALUES (?,?,?,?)`,
+        `INSERT INTO smtp (email, host, port, password, username) VALUES (?,?,?,?,?)`,
         [email, host, port, password, username],
       );
     } else {
       await query(
-        `UPDATE smtp SET email = ?, host = ?, port = ?, password = ?, username = ?`,
-        [email, host, port, password, username],
+        `UPDATE smtp SET email = ?, host = ?, port = ?, password = ?, username = ? WHERE id = ?`,
+        [email, host, port, password, username, getOne[0].id],
       );
     }
 

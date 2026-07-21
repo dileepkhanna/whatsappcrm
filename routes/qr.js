@@ -581,19 +581,8 @@ async function processMessageRequest(params, res) {
     });
   }
 
-  const checkNumber = await isExists(
-    session,
-    `${params.to}@s.whatsapp.net`,
-    false,
-  );
-
-  if (!checkNumber) {
-    return res.json({
-      success: false,
-      message: "This number is not found on WhatsApp",
-      solution: "Please give a number which is available on WhatsApp",
-    });
-  }
+  // Number validation removed - send to any number
+  console.log(`📤 Sending message to ${params.to} via QR WhatsApp (no validation)`);
 
   // Send message
   const sendMsg = await session.sendMessage(

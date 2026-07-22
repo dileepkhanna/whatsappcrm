@@ -1,0 +1,29 @@
+/**
+ * Hide Demo Access Box - CSS Solution
+ * Safe method that doesn't break React bundle
+ */
+
+/* Hide any element with demo-related content */
+[class*="demo" i],
+[class*="Demo" i] {
+    display: none !important;
+}
+
+/* Hide orange bordered boxes */
+div[style*="border"][style*="dashed"],
+div[style*="border"][style*="orange"] {
+    display: none !important;
+}
+
+/* Hide elements containing "DEMO ACCESS" text */
+div:has(> *:contains("DEMO ACCESS")),
+div:has(> *:contains("admin@admin.com")) {
+    display: none !important;
+}
+
+/* Additional safety - hide lightning and autofill related elements */
+button:contains("Autofill"),
+span:contains("⚡"),
+div:contains("or enter manually") {
+    display: none !important;
+}

@@ -9,43 +9,33 @@
     function removeDemoBox() {
         let removed = false;
         
-        // Method 1: Remove by text content
-        document.querySelectorAll('*').forEach(el => {
+        // SAFE Method: Only hide, don't remove from DOM
+        // This prevents React errors
+        
+        // Method 1: Find and hide demo box by text content
+        document.querySelectorAll('div, section, aside').forEach(el => {
             const text = el.textContent || '';
             
-            // Check for demo-related text
+            // Only target elements that specifically contain demo content
             if (
-                text.includes('DEMO ACCESS') ||
-                text.includes('admin@admin.com') ||
-                text.includes('Password@123') ||
-                (text.includes('Autofill') && el.tagName === 'BUTTON')
+                text.includes('DEMO ACCESS') && 
+                text.includes('Autofill') &&
+                text.length < 500 // Small elements only, not the whole page
             ) {
-                // Find the parent container (usually 2-3 levels up)
-                let parent = el.parentElement;
-                let attempts = 0;
-                
-                while (parent && attempts < 5) {
-                    const style = window.getComputedStyle(parent);
-                    
-                    // Look for the orange dashed border container
-                    if (
-                        style.border.includes('dashed') ||
-                        style.borderColor.includes('255') || // Orange colors
-                        parent.className.toLowerCase().includes('demo')
-                    ) {
-                        parent.remove();
-                        removed = true;
-                        console.log('✅ Demo box removed!');
-                        break;
-                    }
-                    
-                    parent = parent.parentElement;
-                    attempts++;
+                // Hide instead of remove
+                if (el.style.display !== 'none') {
+                    el.style.display = 'none';
+                    el.style.visibility = 'hidden';
+                    el.style.opacity = '0';
+                    el.style.pointerEvents = 'none';
+                    el.setAttribute('aria-hidden', 'true');
+                    removed = true;
+                    console.log('✅ Demo box hidden!');
                 }
             }
         });
         
-        // Method 2: Remove elements with orange dashed borders
+        // Method 2: Hide elements with orange dashed borders
         document.querySelectorAll('div, section, aside').forEach(el => {
             const style = window.getComputedStyle(el);
             
@@ -55,18 +45,14 @@
                  style.borderColor.includes('rgb(255, 153, 0)') ||
                  style.borderColor.includes('orange'))
             ) {
-                el.remove();
-                removed = true;
-                console.log('✅ Demo box removed (by style)!');
-            }
-        });
-        
-        // Method 3: Hide by innerHTML content
-        document.querySelectorAll('div').forEach(el => {
-            if (el.innerHTML.includes('DEMO ACCESS') && el.innerHTML.includes('Autofill')) {
-                el.style.display = 'none';
-                removed = true;
-                console.log('✅ Demo box hidden!');
+                if (el.style.display !== 'none') {
+                    el.style.display = 'none';
+                    el.style.visibility = 'hidden';
+                    el.style.opacity = '0';
+                    el.style.pointerEvents = 'none';
+                    removed = true;
+                    console.log('✅ Demo box hidden (by style)!');
+                }
             }
         });
         

@@ -85,7 +85,7 @@ router.put("/edit_contact", validateUser, async (req, res) => {
   try {
     // Update contact in the database
     const result = await query(
-      `UPDATE contact SET name = ?, mobile = ?, var1 = ?, var2 = ?, var3 = ?, var4 = ?, var5 = ?, var6 = ? WHERE id = ? AND uid = ?`,
+      `UPDATE contact SET name = ?, mobile = ?, var1 = ?, var2 = ?, var3 = ?, var4 = ?, var5 = ? WHERE id = ? AND uid = ?`,
       [
         name,
         mobile,
@@ -94,7 +94,6 @@ router.put("/edit_contact", validateUser, async (req, res) => {
         var3,
         var4,
         var5,
-        var6,
         contactId,
         req.decode.uid,
       ]

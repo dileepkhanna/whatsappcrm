@@ -219,6 +219,7 @@ router.post("/update_web_config", adminValidator, async (req, res) => {
   try {
     const {
       app_name,
+      page_title,
       custom_home,
       is_custom_home,
       meta_description,
@@ -266,7 +267,7 @@ router.post("/update_web_config", adminValidator, async (req, res) => {
 
     // ── DB update (existing) ────────────────────────────────────
     await query(
-      `UPDATE web_public SET logo = ?, app_name = ?, custom_home = ?,
+      `UPDATE web_public SET logo = ?, app_name = ?, page_title = ?, custom_home = ?,
        is_custom_home = ?, meta_description = ?, currency_code = ?,
        currency_symbol = ?, home_page_tutorial = ?,
        chatbot_screen_tutorial = ?, broadcast_screen_tutorial = ?,
@@ -274,6 +275,7 @@ router.post("/update_web_config", adminValidator, async (req, res) => {
       [
         filename,
         app_name,
+        page_title || app_name,
         custom_home,
         parseInt(is_custom_home) > 0 ? 1 : 0,
         meta_description,
@@ -291,6 +293,7 @@ router.post("/update_web_config", adminValidator, async (req, res) => {
     try {
       patchIndexHtml({
         app_name,
+        page_title: page_title || app_name,
         meta_description,
         logo: filename, // pass null/empty if no logo change is fine too
       });

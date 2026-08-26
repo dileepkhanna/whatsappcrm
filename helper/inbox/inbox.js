@@ -322,7 +322,25 @@ async function processMessage({
         { chatId: latestConversation?.chatId },
         "request_update_chat_list",
       );
+      
+      // ✅ Emit new message event for real-time updates
       if (latestConversation?.newMessage) {
+        sendToSocket(
+          socket?.socketId,
+          {
+            message: latestConversation?.newMessage,
+            chat_id: latestConversation?.chatId,
+          },
+          "message.new"
+        );
+        
+        // Also emit chat-specific event
+        sendToSocket(
+          socket?.socketId,
+          latestConversation?.newMessage,
+          `new_message_${latestConversation?.chatId}`
+        );
+        
         sendToSocket(socket?.socketId, {}, "ring");
       }
     });

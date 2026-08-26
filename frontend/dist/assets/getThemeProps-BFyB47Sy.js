@@ -1,0 +1,1 @@
+import{A as e,k as t}from"./Box-BLXgjf5s.js";var n=e();function r(e){let{theme:n,name:r,props:i}=e;return!n||!n.components||!n.components[r]||!n.components[r].defaultProps?i:t(n.components[r].defaultProps,i)}export{n,r as t};

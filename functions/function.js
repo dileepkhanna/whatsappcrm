@@ -242,13 +242,14 @@ async function importConversationsFromJson({
         try {
           await query(
             `INSERT INTO beta_conversation 
-              (type, chat_id, uid, status, metaChatId, msgContext, reaction, timestamp, senderName, senderMobile, star, route, context, origin, createdAt)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              (type, chat_id, uid, status, sentBy, metaChatId, msgContext, reaction, timestamp, senderName, senderMobile, star, route, context, origin, createdAt)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               convo.type || "text",
               newChatId,
               uid,
               convo.status || "",
+              convo.sentBy || "bot",
               convo.metaChatId || "",
               JSON.stringify(convo.msgContext || {}),
               convo.reaction || null,
@@ -1728,6 +1729,7 @@ async function getBusinessPhoneNumber(
     headers: {
       Authorization: `Bearer ${bearerToken}`,
     },
+    timeout: 30000 // 30 second timeout
   };
 
   try {
@@ -1735,20 +1737,32 @@ async function getBusinessPhoneNumber(
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error("Error fetching data:", error);
-    throw error; // Re-throw the error to handle it upstream
+    console.error("Error fetching business phone number:", error);
+    const isTimeout = error.type === 'request-timeout' || error.message?.includes('timeout');
+    return {
+      error: {
+        message: isTimeout 
+          ? 'Request timeout: Meta API took too long to respond (30s)' 
+          : error.message || 'Network error occurred',
+        error_user_msg: isTimeout
+          ? 'The request timed out. Please check your internet connection and try again.'
+          : 'Failed to verify business phone number. Please check your Meta API credentials.'
+      }
+    };
   }
 }
 
 async function createMetaTemplet(apiVersion, waba_id, bearerToken, body) {
   const url = `https://graph.facebook.com/${apiVersion}/${waba_id}/message_templates`;
+  
   const options = {
     method: "POST",
     headers: {
       Authorization: `Bearer ${bearerToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body), // Include the request body here
+    body: JSON.stringify(body),
+    timeout: 30000 // 30 second timeout
   };
 
   try {
@@ -1756,8 +1770,19 @@ async function createMetaTemplet(apiVersion, waba_id, bearerToken, body) {
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error("Error fetching data:", error);
-    throw error; // Re-throw the error to handle it upstream
+    console.error("Error creating meta template:", error);
+    // Return error in expected format instead of throwing
+    const isTimeout = error.type === 'request-timeout' || error.message?.includes('timeout');
+    return {
+      error: {
+        message: isTimeout 
+          ? 'Request timeout: Meta API took too long to respond (30s)' 
+          : error.message || 'Network error occurred',
+        error_user_msg: isTimeout
+          ? 'The request timed out. Please check your internet connection and Meta API status, then try again.'
+          : 'Failed to connect to Meta API. Please check your credentials and try again.'
+      }
+    };
   }
 }
 
@@ -1768,6 +1793,7 @@ async function getAllTempletsMeta(apiVersion, waba_id, bearerToken) {
     headers: {
       Authorization: `Bearer ${bearerToken}`,
     },
+    timeout: 30000 // 30 second timeout
   };
 
   try {
@@ -1775,8 +1801,18 @@ async function getAllTempletsMeta(apiVersion, waba_id, bearerToken) {
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error("Error fetching data:", error);
-    throw error; // Re-throw the error to handle it upstream
+    console.error("Error fetching templates:", error);
+    const isTimeout = error.type === 'request-timeout' || error.message?.includes('timeout');
+    return {
+      error: {
+        message: isTimeout 
+          ? 'Request timeout: Meta API took too long to respond (30s)' 
+          : error.message || 'Network error occurred',
+        error_user_msg: isTimeout
+          ? 'The request timed out. Please check your internet connection and try again.'
+          : 'Failed to fetch templates from Meta API. Please check your credentials and try again.'
+      }
+    };
   }
 }
 
@@ -1787,6 +1823,7 @@ async function delMetaTemplet(apiVersion, waba_id, bearerToken, name) {
     headers: {
       Authorization: `Bearer ${bearerToken}`,
     },
+    timeout: 30000 // 30 second timeout
   };
 
   try {
@@ -1794,8 +1831,19 @@ async function delMetaTemplet(apiVersion, waba_id, bearerToken, name) {
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error("Error fetching data:", error);
-    throw error; // Re-throw the error to handle it upstream
+    console.error("Error deleting template:", error);
+    const isTimeout = error.type === 'request-timeout' || error.message?.includes('timeout');
+    return {
+      error: {
+        message: isTimeout 
+          ? 'Request timeout: Meta API took too long to respond (30s)' 
+          : error.message || 'Network error occurred',
+        error_user_msg: isTimeout
+          ? 'The request timed out. Please check your internet connection and try again.'
+          : 'Failed to delete template from Meta API. Please check your credentials and try again.',
+        error_user_title: 'Delete Template Failed'
+      }
+    };
   }
 }
 
@@ -2006,6 +2054,7 @@ async function sendMetatemplet(
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
+    timeout: 40000 // 40 second timeout for sending messages
   };
 
   try {
@@ -2018,8 +2067,18 @@ async function sendMetatemplet(
 
     return data;
   } catch (error) {
-    console.error("Error sending message:", error);
-    throw error;
+    console.error("Error sending template message:", error);
+    const isTimeout = error.type === 'request-timeout' || error.message?.includes('timeout');
+    return {
+      error: {
+        message: isTimeout 
+          ? 'Request timeout: Failed to send template message (40s)' 
+          : error.message || 'Network error occurred',
+        error_user_msg: isTimeout
+          ? 'Message sending timed out. Please check your internet connection and try again.'
+          : 'Failed to send template message. Please check your Meta API credentials.'
+      }
+    };
   }
 }
 
@@ -2050,6 +2109,7 @@ async function getSessionUploadMediaMeta(
     headers: {
       Authorization: `Bearer ${bearerToken}`,
     },
+    timeout: 45000 // 45 second timeout for upload session
   };
 
   try {
@@ -2057,8 +2117,18 @@ async function getSessionUploadMediaMeta(
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error("Error fetching data:", error);
-    throw error; // Re-throw the error to handle it upstream
+    console.error("Error creating upload session:", error);
+    const isTimeout = error.type === 'request-timeout' || error.message?.includes('timeout');
+    return {
+      error: {
+        message: isTimeout 
+          ? 'Request timeout: Meta API took too long to respond (45s)' 
+          : error.message || 'Network error occurred',
+        error_user_msg: isTimeout
+          ? 'The upload session creation timed out. Please try again.'
+          : 'Failed to create upload session. Please check your Meta API credentials.'
+      }
+    };
   }
 }
 
@@ -2080,6 +2150,7 @@ async function uploadFileMeta(sessionId, filePath, apiVersion, accessToken) {
           Cookie: "ps_l=0; ps_n=0",
         },
         body: fileData,
+        timeout: 60000 // 60 second timeout for file upload
       };
 
       // Make fetch request
@@ -2092,7 +2163,16 @@ async function uploadFileMeta(sessionId, filePath, apiVersion, accessToken) {
       const data = await response.json();
       return resolve({ success: true, data });
     } catch (error) {
-      return resolve({ success: false, data: error });
+      console.error("Error uploading file to Meta:", error);
+      const isTimeout = error.type === 'request-timeout' || error.message?.includes('timeout');
+      return resolve({ 
+        success: false, 
+        data: {
+          message: isTimeout 
+            ? 'File upload timed out after 60 seconds. Try uploading a smaller file.' 
+            : error.message || 'File upload failed'
+        }
+      });
     }
   });
 }
@@ -2109,6 +2189,7 @@ async function getMetaNumberDetail(
       Authorization: `Bearer ${bearerToken}`,
       "Content-Type": "application/json",
     },
+    timeout: 30000 // 30 second timeout
   };
 
   try {
@@ -2116,8 +2197,18 @@ async function getMetaNumberDetail(
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error("Error fetching data:", error);
-    throw error; // Re-throw the error to handle it upstream
+    console.error("Error fetching Meta number detail:", error);
+    const isTimeout = error.type === 'request-timeout' || error.message?.includes('timeout');
+    return {
+      error: {
+        message: isTimeout 
+          ? 'Request timeout: Meta API took too long to respond (30s)' 
+          : error.message || 'Network error occurred',
+        error_user_msg: isTimeout
+          ? 'The request timed out. Please check your internet connection and try again.'
+          : 'Failed to fetch Meta number details. Please check your credentials.'
+      }
+    };
   }
 }
 
@@ -2737,6 +2828,7 @@ async function getAllTempletsMetaBeta(
     headers: {
       Authorization: `Bearer ${bearerToken}`,
     },
+    timeout: 30000 // 30 second timeout
   };
 
   try {
@@ -2744,8 +2836,18 @@ async function getAllTempletsMetaBeta(
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error("Error fetching data:", error);
-    throw error;
+    console.error("Error fetching templates (Beta):", error);
+    const isTimeout = error.type === 'request-timeout' || error.message?.includes('timeout');
+    return {
+      error: {
+        message: isTimeout 
+          ? 'Request timeout: Meta API took too long to respond (30s)' 
+          : error.message || 'Network error occurred',
+        error_user_msg: isTimeout
+          ? 'The request timed out. Please check your internet connection and try again.'
+          : 'Failed to fetch templates from Meta API. Please check your credentials.'
+      }
+    };
   }
 }
 
@@ -2830,6 +2932,18 @@ async function sendTemplateMessage(
 ) {
   const url = `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`;
 
+  console.log('🔧 sendTemplateMessage called with:', {
+    apiVersion,
+    phoneNumberId,
+    templateName,
+    language,
+    recipientPhone,
+    bodyVariablesCount: bodyVariables.length,
+    hasHeaderVariable: !!headerVariable,
+    headerVariableType: headerVariable?.type,
+    buttonVariablesCount: buttonVariables.length,
+  });
+
   // Prepare the message payload
   const messagePayload = {
     messaging_product: "whatsapp",
@@ -2857,6 +2971,7 @@ async function sendTemplateMessage(
       }),
     };
     messagePayload.template.components.push(bodyComponent);
+    console.log('✏️ Added body component with', bodyVariables.length, 'variables');
   }
 
   // Add header component with variable if provided
@@ -2874,6 +2989,7 @@ async function sendTemplateMessage(
           link: headerVariable.url,
         },
       });
+      console.log('🖼️ Added image header:', headerVariable.url);
     } else if (headerVariable.type === "document") {
       headerComponent.parameters.push({
         type: "document",
@@ -2882,6 +2998,7 @@ async function sendTemplateMessage(
           filename: headerVariable.filename || "document",
         },
       });
+      console.log('📄 Added document header:', headerVariable.url);
     } else if (headerVariable.type === "video") {
       headerComponent.parameters.push({
         type: "video",
@@ -2889,6 +3006,7 @@ async function sendTemplateMessage(
           link: headerVariable.url,
         },
       });
+      console.log('🎥 Added video header:', headerVariable.url);
     }
 
     messagePayload.template.components.push(headerComponent);
@@ -2913,7 +3031,11 @@ async function sendTemplateMessage(
         messagePayload.template.components.push(buttonComponent);
       }
     });
+    console.log('🔘 Added', buttonVariables.length, 'button variables');
   }
+
+  console.log('📦 Final payload being sent to Meta API:');
+  console.log(JSON.stringify(messagePayload, null, 2));
 
   // Send the request
   const options = {
@@ -2926,11 +3048,20 @@ async function sendTemplateMessage(
   };
 
   try {
+    console.log('🌐 Sending request to:', url);
     const response = await fetch(url, options);
     const data = await response.json();
+    
+    if (data.error) {
+      console.log('❌ Meta API returned error:', JSON.stringify(data.error, null, 2));
+    } else {
+      console.log('✅ Meta API success response:', JSON.stringify(data, null, 2));
+    }
+    
     return data;
   } catch (error) {
-    console.error("Error sending template message:", error);
+    console.error("❌ Exception in sendTemplateMessage:", error);
+    console.error("❌ Error stack:", error.stack);
     throw error;
   }
 }
@@ -3805,43 +3936,51 @@ async function handleWAFormSubmission(change, userUID) {
   try {
     const messages = change.value?.messages || [];
 
+    console.log(`📋 [FORM SUBMISSION CHECK] Processing ${messages.length} messages for user ${userUID}`);
+
     for (const message of messages) {
+      console.log(`📋 [FORM CHECK] Message type: ${message?.type}, Interactive type: ${message?.interactive?.type}`);
+      
       if (
         message?.type === "interactive" &&
         message?.interactive?.type === "nfm_reply"
       ) {
+        console.log("✅ [FORM SUBMISSION DETECTED] nfm_reply message found!");
+        
         const fromPhone = message.from;
         const responseJson = message.interactive.nfm_reply?.response_json;
+
+        console.log(`📋 [FORM DATA] From: ${fromPhone}, Response JSON length: ${responseJson?.length || 0}`);
 
         let payload = {};
         try {
           payload = JSON.parse(responseJson);
-        } catch {
+          console.log(`📋 [FORM PAYLOAD] Parsed successfully:`, JSON.stringify(payload).substring(0, 200));
+        } catch (parseErr) {
+          console.error("❌ [FORM PARSE ERROR]", parseErr);
           payload = {};
         }
 
         // Match form by flow_token embedded in payload
-        // flow_token format: "TOKEN_<timestamp>_<flow_id>" or just match by uid + flow_id
         const flowToken = payload?.flow_token || "";
+        console.log(`📋 [FLOW TOKEN] ${flowToken}`);
 
-        // Try to find the form by matching flow_id from wa_forms
-        // We stored flow_token as "TOKEN_<Date.now()>" so we can't reverse it,
-        // but we CAN match by uid — get all forms and find by flow_token prefix if needed
-        // Best approach: match the most recent form submission by uid
-        // (or store flow_token → flow_id mapping — see note below)
+        // Get all forms for this user
         const forms = await query(`SELECT * FROM wa_forms WHERE uid = ?`, [
           userUID,
         ]);
+        
+        console.log(`📋 [FORMS FOUND] ${forms.length} forms for user`);
 
-        // Try to match flow_id from payload flow_token if you encoded it,
-        // otherwise fall back to most recent form
+        // Try to match flow_id from payload flow_token
         let matchedForm = null;
 
-        // If you want exact matching, encode flow_id in the token (see backend note below)
-        // For now, scan forms to find a match via flow_token pattern
+        // Scan forms to find a match via flow_token pattern
         for (const f of forms) {
+          console.log(`📋 [FORM CHECK] Checking form: ${f.name} (flow_id: ${f.flow_id})`);
           if (flowToken.includes(f.flow_id)) {
             matchedForm = f;
+            console.log(`✅ [FORM MATCHED] Found matching form: ${f.name}`);
             break;
           }
         }
@@ -3849,10 +3988,19 @@ async function handleWAFormSubmission(change, userUID) {
         // Fallback: most recently used form
         if (!matchedForm && forms.length > 0) {
           matchedForm = forms[forms.length - 1];
+          console.log(`⚠️ [FORM FALLBACK] Using most recent form: ${matchedForm.name}`);
         }
 
-        // ✅ Only store uid, flow_id, form_name, from_phone, raw_payload
-        await query(
+        if (!matchedForm) {
+          console.error("❌ [FORM ERROR] No form found for submission");
+          return;
+        }
+
+        // ✅ Save submission
+        console.log(`💾 [SAVING SUBMISSION] Form: ${matchedForm.name}, From: ${fromPhone}`);
+        
+        // Save to wa_form_submissions table
+        const result = await query(
           `INSERT INTO wa_form_submissions 
             (uid, flow_id, form_name, from_phone, raw_payload, createdAt)
            VALUES (?, ?, ?, ?, ?, NOW())`,
@@ -3864,30 +4012,106 @@ async function handleWAFormSubmission(change, userUID) {
             JSON.stringify(payload),
           ],
         );
+        
+        console.log(`✅ [SUBMISSION SAVED TO wa_form_submissions] ID: ${result.insertId}, Form: ${matchedForm.name}`);
+
+        // Also save to beta_conversation so it shows in Inbox
+        // Format the form data for display
+        let formDataText = `📋 *Form Submission: ${matchedForm.name}*\n\n`;
+        for (const [key, value] of Object.entries(payload)) {
+          if (key !== 'flow_token') {
+            // Convert snake_case to Title Case for display
+            const label = key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+            const displayValue = Array.isArray(value) ? value.join(', ') : value;
+            formDataText += `*${label}:* ${displayValue}\n`;
+          }
+        }
+
+        // Get or create chat for this contact
+        const [existingChat] = await query(
+          `SELECT * FROM beta_chats WHERE uid = ? AND sender_mobile = ?`,
+          [userUID, fromPhone]
+        );
+
+        let chatId = existingChat?.chat_id;
+
+        if (!existingChat) {
+          // Create new chat
+          chatId = randomstring.generate({ length: 28, charset: "alphanumeric" });
+          await query(
+            `INSERT INTO beta_chats (uid, chat_id, sender_mobile, sender_name, unread_count, origin, createdAt) 
+             VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+            [userUID, chatId, fromPhone, fromPhone, 1, 'whatsapp']
+          );
+          console.log(`✅ [CHAT CREATED] chat_id: ${chatId}`);
+        } else {
+          // Update unread count
+          await query(
+            `UPDATE beta_chats SET unread_count = unread_count + 1, updatedAt = NOW() WHERE chat_id = ?`,
+            [chatId]
+          );
+        }
+
+        // Save form submission message to beta_conversation
+        const msgContext = JSON.stringify({
+          type: 'form_submission',
+          form_name: matchedForm.name,
+          flow_id: matchedForm.flow_id,
+          formatted_text: formDataText,
+          raw_data: payload
+        });
+
+        await query(
+          `INSERT INTO beta_conversation 
+            (type, chat_id, uid, status, sentBy, msgContext, timestamp, senderName, senderMobile, origin, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            'text',
+            chatId,
+            userUID,
+            'delivered',
+            'customer',
+            msgContext,
+            Math.floor(Date.now() / 1000),
+            fromPhone,
+            fromPhone,
+            'whatsapp',
+          ]
+        );
+
+        console.log(`✅ [MESSAGE SAVED TO INBOX] chat_id: ${chatId}, Type: Form Submission`);
       }
     }
   } catch (err) {
-    console.error("❌ handleWAFormSubmission error:", err);
+    console.error("❌ [handleWAFormSubmission ERROR]", err);
   }
 }
 
-function patchIndexHtml({ app_name, meta_description, logo }) {
-  const indexPath = path.join(__dirname, "../client/public/index.html");
+function patchIndexHtml({ app_name, page_title, meta_description, logo }) {
+  // Patch both old client and new frontend dist
+  const indexPaths = [
+    path.join(__dirname, "../client/public/index.html"),
+    path.join(__dirname, "../frontend/dist/index.html"),
+  ];
 
-  if (!fs.existsSync(indexPath)) {
-    console.warn("⚠️  index.html not found at:", indexPath);
-    return;
-  }
+  indexPaths.forEach((indexPath) => {
+    if (!fs.existsSync(indexPath)) {
+      console.warn("⚠️  index.html not found at:", indexPath);
+      return;
+    }
 
-  let html = fs.readFileSync(indexPath, "utf8");
+    let html = fs.readFileSync(indexPath, "utf8");
 
-  // ── 1. <title> ──────────────────────────────────────────────────
-  if (app_name) {
-    html = html.replace(
-      /<title>.*?<\/title>/i,
-      `<title>${escapeHtml(app_name)}</title>`,
-    );
-  }
+    // Use page_title for browser tab, fallback to app_name
+    const browserTitle = page_title || app_name;
+
+    // ── 1. <title> ──────────────────────────────────────────────────
+    if (browserTitle) {
+      html = html.replace(
+        /<title>.*?<\/title>/i,
+        `<title>${escapeHtml(browserTitle)}</title>`,
+      );
+    }
 
   // ── 2. meta description ─────────────────────────────────────────
   if (meta_description !== undefined) {
@@ -3936,23 +4160,24 @@ function patchIndexHtml({ app_name, meta_description, logo }) {
     );
   }
 
-  // ── 4. og:image / twitter:image ─────────────────────────────────
-  if (logo) {
-    const imageUrl = `/media/${logo}`;
-    html = replaceOrInsertMeta(
-      html,
-      'property="og:image"',
-      `<meta property="og:image" content="${imageUrl}" />`,
-    );
-    html = replaceOrInsertMeta(
-      html,
-      'name="twitter:image"',
-      `<meta name="twitter:image" content="${imageUrl}" />`,
-    );
-  }
+    // ── 4. og:image / twitter:image ─────────────────────────────────
+    if (logo) {
+      const imageUrl = `/media/${logo}`;
+      html = replaceOrInsertMeta(
+        html,
+        'property="og:image"',
+        `<meta property="og:image" content="${imageUrl}" />`,
+      );
+      html = replaceOrInsertMeta(
+        html,
+        'name="twitter:image"',
+        `<meta name="twitter:image" content="${imageUrl}" />`,
+      );
+    }
 
-  fs.writeFileSync(indexPath, html, "utf8");
-  console.log("✅ index.html meta tags patched");
+    fs.writeFileSync(indexPath, html, "utf8");
+    console.log("✅ index.html meta tags patched:", indexPath);
+  });
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

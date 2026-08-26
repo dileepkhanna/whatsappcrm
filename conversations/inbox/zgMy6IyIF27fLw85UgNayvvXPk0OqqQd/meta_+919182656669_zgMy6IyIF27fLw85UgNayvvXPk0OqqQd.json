@@ -1,0 +1,56 @@
+[
+  {
+    "type": "text",
+    "metaChatId": "wamid.HBgMOTE5MTgyNjU2NjY5FQIAERgSNDg5ODVGQzU1NzkwNkEwOTRBAA==",
+    "msgContext": {
+      "type": "text",
+      "text": {
+        "preview_url": true,
+        "body": "hi"
+      }
+    },
+    "reaction": "",
+    "timestamp": 1787147700,
+    "senderName": "+919182656669",
+    "senderMobile": "+919182656669",
+    "status": "sent",
+    "star": false,
+    "route": "OUTGOING"
+  },
+  {
+    "type": "text",
+    "metaChatId": "wamid.HBgMOTE5MTgyNjU2NjY5FQIAERgSQ0NERjRBODc5QTIwOTZBQzFBAA==",
+    "msgContext": {
+      "type": "text",
+      "text": {
+        "preview_url": true,
+        "body": "hi"
+      }
+    },
+    "reaction": "",
+    "timestamp": 1787147717,
+    "senderName": "+919182656669",
+    "senderMobile": "+919182656669",
+    "status": "sent",
+    "star": false,
+    "route": "OUTGOING"
+  },
+  {
+    "type": "text",
+    "metaChatId": "wamid.HBgMOTE5MTgyNjU2NjY5FQIAERgSNkIyNDAzMEJEN0Y5MjEzQzhGAA==",
+    "msgContext": {
+      "type": "text",
+      "text": {
+        "preview_url": true,
+        "body": "hi"
+      }
+    },
+    "reaction": "",
+    "timestamp": 1787148090,
+    "senderName": "+919182656669",
+    "senderMobile": "+919182656669",
+    "status": "sent",
+    "star": false,
+    "route": "OUTGOING"
+  }
+]

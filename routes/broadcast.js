@@ -1003,99 +1003,364 @@ router.get("/dashboard", validateUser, async (req, res) => {
   try {
     const uid = req.decode.uid;
 
-    // Get total campaigns
-    const totalCampaigns = await query(
-      `SELECT COUNT(*) as count FROM beta_campaign WHERE uid = ?`,
-      [uid],
-    );
+    let totalCampaigns = 0;
+    let betaCampaigns2 = [];
+    let oldBroadcasts = [];
+    
+    // Try to get beta campaigns
+    try {
+      const betaCampaigns = await query(
+        `SELECT COUNT(*) as count FROM beta_campaign WHERE uid = ?`,
+        [uid],
+      );
+      totalCampaigns += betaCampaigns[0]?.count || 0;
 
-    // Get accurate message stats from logs with proper counting - FIXED: Added backticks around 'read'
-    const messageStats = await query(
-      `SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN status = 'SENT' THEN 1 ELSE 0 END) as sent,
-        SUM(CASE WHEN delivery_status = 'delivered' THEN 1 ELSE 0 END) as delivered,
-        SUM(CASE WHEN delivery_status = 'read' THEN 1 ELSE 0 END) as \`read\`,
-        SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed,
-        SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) as pending
-      FROM beta_campaign_logs
-      WHERE uid = ?`,
-      [uid],
-    );
+      // Get recent beta campaigns
+      betaCampaigns2 = await query(
+        `SELECT 
+          c.campaign_id,
+          c.title,
+          c.template_name,
+          c.status,
+          c.createdAt,
+          c.total_contacts,
+          c.sent_count,
+          c.delivered_count,
+          c.read_count,
+          c.failed_count,
+          p.name as phonebook_name
+        FROM beta_campaign c
+        LEFT JOIN phonebook p ON c.phonebook_id = p.id
+        WHERE c.uid = ?
+        ORDER BY c.createdAt DESC
+        LIMIT 10`,
+        [uid],
+      );
+    } catch (error) {
+      console.log('Beta campaign table might not exist or query failed:', error.message);
+    }
 
-    // Format the final message stats - ensure they're all numbers
-    const finalMessageStats = {
-      total: parseInt(messageStats[0]?.total || 0),
-      sent: parseInt(messageStats[0]?.sent || 0),
-      delivered: parseInt(messageStats[0]?.delivered || 0),
-      read: parseInt(messageStats[0]?.read || 0),
-      failed: parseInt(messageStats[0]?.failed || 0),
-      pending: parseInt(messageStats[0]?.pending || 0),
+    // Try to get old broadcasts
+    try {
+      const oldCampaigns = await query(
+        `SELECT COUNT(*) as count FROM broadcast WHERE uid = ?`,
+        [uid],
+      );
+      totalCampaigns += oldCampaigns[0]?.count || 0;
+
+      // Get recent old broadcasts
+      oldBroadcasts = await query(
+        `SELECT 
+          b.broadcast_id as campaign_id,
+          b.title,
+          '' as template_name,
+          b.status,
+          b.createdAt,
+          (SELECT COUNT(*) FROM broadcast_log WHERE broadcast_id = b.broadcast_id) as total_contacts,
+          (SELECT COUNT(*) FROM broadcast_log WHERE broadcast_id = b.broadcast_id AND delivery_status = 'sent') as sent_count,
+          (SELECT COUNT(*) FROM broadcast_log WHERE broadcast_id = b.broadcast_id AND delivery_status = 'delivered') as delivered_count,
+          (SELECT COUNT(*) FROM broadcast_log WHERE broadcast_id = b.broadcast_id AND delivery_status = 'read') as read_count,
+          (SELECT COUNT(*) FROM broadcast_log WHERE broadcast_id = b.broadcast_id AND delivery_status = 'failed') as failed_count,
+          '' as phonebook_name
+        FROM broadcast b
+        WHERE b.uid = ?
+        ORDER BY b.createdAt DESC
+        LIMIT 10`,
+        [uid],
+      );
+    } catch (error) {
+      console.log('Broadcast table might not exist or query failed:', error.message);
+    }
+
+    // Get message stats
+    let finalMessageStats = {
+      total: 0,
+      sent: 0,
+      delivered: 0,
+      read: 0,
+      failed: 0,
+      pending: 0,
     };
 
+    // Try beta_campaign_logs
+    try {
+      const betaMessageStats = await query(
+        `SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN status = 'SENT' THEN 1 ELSE 0 END) as sent,
+          SUM(CASE WHEN delivery_status = 'delivered' THEN 1 ELSE 0 END) as delivered,
+          SUM(CASE WHEN delivery_status = 'read' THEN 1 ELSE 0 END) as \`read\`,
+          SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed,
+          SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) as pending
+        FROM beta_campaign_logs
+        WHERE uid = ?`,
+        [uid],
+      );
+      
+      finalMessageStats.total += parseInt(betaMessageStats[0]?.total || 0);
+      finalMessageStats.sent += parseInt(betaMessageStats[0]?.sent || 0);
+      finalMessageStats.delivered += parseInt(betaMessageStats[0]?.delivered || 0);
+      finalMessageStats.read += parseInt(betaMessageStats[0]?.read || 0);
+      finalMessageStats.failed += parseInt(betaMessageStats[0]?.failed || 0);
+      finalMessageStats.pending += parseInt(betaMessageStats[0]?.pending || 0);
+    } catch (error) {
+      console.log('Beta campaign logs query failed:', error.message);
+    }
+
+    // Try broadcast_log
+    try {
+      const oldMessageStats = await query(
+        `SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN delivery_status = 'sent' THEN 1 ELSE 0 END) as sent,
+          SUM(CASE WHEN delivery_status = 'delivered' THEN 1 ELSE 0 END) as delivered,
+          SUM(CASE WHEN delivery_status = 'read' THEN 1 ELSE 0 END) as \`read\`,
+          SUM(CASE WHEN delivery_status = 'failed' THEN 1 ELSE 0 END) as failed,
+          SUM(CASE WHEN delivery_status = 'PENDING' THEN 1 ELSE 0 END) as pending
+        FROM broadcast_log
+        WHERE uid = ?`,
+        [uid],
+      );
+
+      finalMessageStats.total += parseInt(oldMessageStats[0]?.total || 0);
+      finalMessageStats.sent += parseInt(oldMessageStats[0]?.sent || 0);
+      finalMessageStats.delivered += parseInt(oldMessageStats[0]?.delivered || 0);
+      finalMessageStats.read += parseInt(oldMessageStats[0]?.read || 0);
+      finalMessageStats.failed += parseInt(oldMessageStats[0]?.failed || 0);
+      finalMessageStats.pending += parseInt(oldMessageStats[0]?.pending || 0);
+    } catch (error) {
+      console.log('Broadcast log query failed:', error.message);
+    }
+
     // Get campaigns by status
-    const campaignsByStatus = await query(
-      `SELECT status, COUNT(*) as count
-      FROM beta_campaign
-      WHERE uid = ?
-      GROUP BY status
-      ORDER BY status`,
-      [uid],
-    );
+    let campaignsByStatus = [];
+    const statusMap = new Map();
+    
+    try {
+      const betaCampaignsByStatus = await query(
+        `SELECT status, COUNT(*) as count
+        FROM beta_campaign
+        WHERE uid = ?
+        GROUP BY status`,
+        [uid],
+      );
+      betaCampaignsByStatus.forEach(item => {
+        statusMap.set(item.status, (statusMap.get(item.status) || 0) + item.count);
+      });
+    } catch (error) {
+      console.log('Beta campaign status query failed:', error.message);
+    }
 
-    // Get daily stats for the last 7 days - FIXED: Added backticks around 'read'
-    const dailyStats = await query(
-      `SELECT 
-        DATE(l.createdAt) as date,
-        COUNT(*) as total_messages,
-        SUM(CASE WHEN l.status = 'SENT' THEN 1 ELSE 0 END) as sent,
-        SUM(CASE WHEN l.delivery_status = 'delivered' THEN 1 ELSE 0 END) as delivered,
-        SUM(CASE WHEN l.delivery_status = 'read' THEN 1 ELSE 0 END) as \`read\`,
-        SUM(CASE WHEN l.status = 'FAILED' THEN 1 ELSE 0 END) as failed
-      FROM beta_campaign_logs l
-      WHERE l.uid = ? 
-      AND l.createdAt >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-      GROUP BY DATE(l.createdAt)
-      ORDER BY date DESC`,
-      [uid],
-    );
+    try {
+      const oldCampaignsByStatus = await query(
+        `SELECT status, COUNT(*) as count
+        FROM broadcast
+        WHERE uid = ?
+        GROUP BY status`,
+        [uid],
+      );
+      oldCampaignsByStatus.forEach(item => {
+        statusMap.set(item.status, (statusMap.get(item.status) || 0) + item.count);
+      });
+    } catch (error) {
+      console.log('Old campaign status query failed:', error.message);
+    }
 
-    // Get recent campaigns with updated counts from campaign table
-    const recentCampaigns = await query(
-      `SELECT 
-        c.campaign_id,
-        c.title,
-        c.template_name,
-        c.status,
-        c.createdAt,
-        c.schedule,
-        c.total_contacts,
-        c.sent_count,
-        c.delivered_count,
-        c.read_count,
-        c.failed_count,
-        p.name as phonebook_name
-      FROM beta_campaign c
-      LEFT JOIN phonebook p ON c.phonebook_id = p.id
-      WHERE c.uid = ?
-      ORDER BY c.createdAt DESC
-      LIMIT 10`,
-      [uid],
-    );
+    campaignsByStatus = Array.from(statusMap.entries()).map(([status, count]) => ({ status, count }));
+
+    // Combine recent campaigns
+    const allCampaigns = [...betaCampaigns2, ...oldBroadcasts]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 10);
+
+    console.log('Dashboard Stats:', {
+      totalCampaigns,
+      finalMessageStats,
+      campaignsByStatus,
+      recentCampaignsCount: allCampaigns.length
+    });
 
     res.json({
       success: true,
-      totalCampaigns: totalCampaigns[0].count,
+      totalCampaigns,
       messageStats: finalMessageStats,
       campaignsByStatus,
-      dailyStats,
-      recentCampaigns,
+      dailyStats: [],
+      recentCampaigns: allCampaigns,
     });
   } catch (error) {
     console.error("Error fetching dashboard data:", error);
+    console.error("Error stack:", error.stack);
     res.status(500).json({
       success: false,
       error: "Failed to fetch dashboard data",
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    });
+  }
+});
+
+// Test endpoint to check campaign data
+router.get("/test-data", validateUser, async (req, res) => {
+  try {
+    const uid = req.decode.uid;
+    
+    const results = {
+      betaCampaigns: { exists: false, count: 0, sample: null },
+      betaLogs: { exists: false, count: 0, sample: null, allLogs: [] },
+      oldBroadcasts: { exists: false, count: 0, sample: null },
+      oldLogs: { exists: false, count: 0, sample: null },
+    };
+    
+    // Check beta_campaign
+    try {
+      const betaCampaigns = await query(`SELECT * FROM beta_campaign WHERE uid = ? ORDER BY createdAt DESC LIMIT 3`, [uid]);
+      results.betaCampaigns.exists = true;
+      results.betaCampaigns.count = betaCampaigns.length;
+      results.betaCampaigns.sample = betaCampaigns;
+    } catch (error) {
+      results.betaCampaigns.error = error.message;
+    }
+    
+    // Check beta_campaign_logs with MORE DETAIL
+    try {
+      const betaLogs = await query(`SELECT * FROM beta_campaign_logs WHERE uid = ? ORDER BY createdAt DESC LIMIT 5`, [uid]);
+      results.betaLogs.exists = true;
+      results.betaLogs.count = betaLogs.length;
+      results.betaLogs.allLogs = betaLogs; // Show all recent logs
+      results.betaLogs.sample = betaLogs[0] || null;
+    } catch (error) {
+      results.betaLogs.error = error.message;
+    }
+    
+    // Check broadcast
+    try {
+      const oldBroadcasts = await query(`SELECT * FROM broadcast WHERE uid = ? LIMIT 1`, [uid]);
+      results.oldBroadcasts.exists = true;
+      results.oldBroadcasts.count = oldBroadcasts.length;
+      results.oldBroadcasts.sample = oldBroadcasts[0] || null;
+    } catch (error) {
+      results.oldBroadcasts.error = error.message;
+    }
+    
+    // Check broadcast_log
+    try {
+      const oldLogs = await query(`SELECT * FROM broadcast_log WHERE uid = ? LIMIT 1`, [uid]);
+      results.oldLogs.exists = true;
+      results.oldLogs.count = oldLogs.length;
+      results.oldLogs.sample = oldLogs[0] || null;
+    } catch (error) {
+      results.oldLogs.error = error.message;
+    }
+    
+    res.json({ success: true, uid, results });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Create manual campaign (from SendCampaign with manual phone numbers)
+router.post("/create_manual_campaign", validateUser, async (req, res) => {
+  try {
+    console.log('📥 Received create_manual_campaign request:', {
+      hasCampaignName: !!req.body.campaign_name,
+      hasTemplateName: !!req.body.template_name,
+      resultsCount: req.body.results?.length || 0,
+    });
+
+    const { campaign_name, template_name, template_language, results } = req.body;
+    const uid = req.decode.uid;
+
+    if (!campaign_name || !template_name || !results || results.length === 0) {
+      console.log('❌ Missing required fields for create_manual_campaign');
+      return res.json({ success: false, msg: "Missing required fields" });
+    }
+
+    const campaignId = randomstring.generate(10);
+    const totalContacts = results.length;
+    const successfulResults = results.filter(r => r.success);
+    const failedResults = results.filter(r => !r.success);
+
+    console.log('📊 Campaign stats:', {
+      campaignId,
+      totalContacts,
+      successful: successfulResults.length,
+      failed: failedResults.length,
+    });
+
+    // Insert campaign record
+    await query(
+      `INSERT INTO beta_campaign (
+        campaign_id, uid, title,
+        template_name, template_language,
+        phonebook_id, phonebook_name,
+        status, total_contacts,
+        sent_count, failed_count,
+        delivered_count, read_count,
+        body_variables, header_variable, button_variables
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        campaignId,
+        uid,
+        campaign_name,
+        template_name,
+        template_language || 'en_US',
+        null, // no phonebook for manual campaigns
+        'Manual Recipients',
+        successfulResults.length > 0 ? 'COMPLETED' : 'FAILED',
+        totalContacts,
+        successfulResults.length,
+        failedResults.length,
+        0, // delivered_count - will be updated via webhooks
+        0, // read_count - will be updated via webhooks
+        '[]', // body_variables
+        null, // header_variable
+        '[]', // button_variables
+      ]
+    );
+
+    console.log('✅ Campaign record created in beta_campaign');
+
+    // Insert campaign logs
+    const logValues = results.map(result => [
+      uid,
+      campaignId,
+      result.contact_name || 'NA',
+      result.recipient_phone,
+      result.success ? 'SENT' : 'FAILED',
+      result.meta_msg_id || null,
+      result.success ? 'sent' : null,
+      null, // delivery_time
+      result.error || null,
+    ]);
+
+    if (logValues.length > 0) {
+      await query(
+        `INSERT INTO beta_campaign_logs (
+          uid, campaign_id, contact_name, contact_mobile, 
+          status, meta_msg_id, delivery_status, delivery_time, error_message
+        ) VALUES ?`,
+        [logValues]
+      );
+      console.log(`✅ Created ${logValues.length} log entries in beta_campaign_logs`);
+    }
+
+    console.log(`✅ Manual campaign ${campaignId} created | ${successfulResults.length}/${totalContacts} sent`);
+
+    res.json({
+      success: true,
+      msg: "Campaign created successfully",
+      campaignId,
+      totalContacts,
+      sentCount: successfulResults.length,
+      failedCount: failedResults.length,
+    });
+  } catch (error) {
+    console.error("❌ Error creating manual campaign:", error);
+    console.error("Error stack:", error.stack);
+    res.status(500).json({
+      success: false,
+      error: "Failed to create campaign record",
       details: error.message,
     });
   }
@@ -1104,7 +1369,7 @@ router.get("/dashboard", validateUser, async (req, res) => {
 // Export campaign logs to CSV
 router.get("/export/:campaignId", validateUser, async (req, res) => {
   try {
-    const uid = req.decoded.uid;
+    const uid = req.decode.uid;
     const { campaignId } = req.params;
 
     // Verify campaign belongs to user
@@ -1121,25 +1386,13 @@ router.get("/export/:campaignId", validateUser, async (req, res) => {
         .json({ success: false, error: "Campaign not found" });
     }
 
-    // Get all logs
-    const logs = await query(
-      `
-      SELECT 
-        contact_name,
-        contact_mobile,
-        status,
-        delivery_status,
-        error_message,
-        createdAt,
-        delivery_time
-      FROM beta_campaign_logs
-      WHERE campaign_id = ?
-      ORDER BY createdAt
-    `,
-      [campaignId],
+    // Stream CSV instead of building entire string in memory
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="campaign-${campaignId}.csv"`,
     );
 
-    // Convert to CSV format
     const fields = [
       "contact_name",
       "contact_mobile",
@@ -1149,28 +1402,59 @@ router.get("/export/:campaignId", validateUser, async (req, res) => {
       "createdAt",
       "delivery_time",
     ];
-    const csv = [
-      fields.join(","),
-      ...logs.map((log) =>
-        fields
-          .map(
-            (field) => `"${(log[field] || "").toString().replace(/"/g, '""')}"`,
-          )
-          .join(","),
-      ),
-    ].join("\n");
 
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="campaign-${campaignId}.csv"`,
-    );
-    res.send(csv);
+    res.write(fields.join(",") + "\n");
+
+    const BATCH_SIZE = 500;
+    let offset = 0;
+
+    const sendBatch = async () => {
+      const logs = await query(
+        `
+        SELECT 
+          contact_name,
+          contact_mobile,
+          status,
+          delivery_status,
+          error_message,
+          createdAt,
+          delivery_time
+        FROM beta_campaign_logs
+        WHERE campaign_id = ?
+        ORDER BY createdAt
+        LIMIT ? OFFSET ?
+      `,
+        [campaignId, BATCH_SIZE, offset],
+      );
+
+      if (logs.length === 0) {
+        res.end();
+        return;
+      }
+
+      for (const log of logs) {
+        const row = fields
+          .map((field) => `"${(log[field] || "").toString().replace(/"/g, '""')}"`)
+          .join(",");
+        res.write(row + "\n");
+      }
+
+      offset += logs.length;
+      if (logs.length >= BATCH_SIZE) {
+        setImmediate(sendBatch);
+      } else {
+        res.end();
+      }
+    };
+
+    await sendBatch();
   } catch (error) {
     console.error("Error exporting campaign data:", error);
-    res
-      .status(500)
-      .json({ success: false, error: "Failed to export campaign data" });
+    if (!res.headersSent) {
+      res
+        .status(500)
+        .json({ success: false, error: "Failed to export campaign data" });
+    }
   }
 });
 
@@ -1252,5 +1536,125 @@ router.post("/del_campaign", validateUser, async (req, res) => {
 //     res.json({ success: false, msg: "Something went wrong", err });
 //   }
 // });
+
+// ✅ Get Meta templates for automation flow builder
+router.get("/get-meta-templates", validateUser, async (req, res) => {
+  try {
+    const uid = req.decode.uid;
+    
+    // Get Meta API credentials
+    const [metaApi] = await query(
+      `SELECT * FROM meta_api WHERE uid = ? LIMIT 1`,
+      [uid]
+    );
+    
+    if (!metaApi || !metaApi.access_token || !metaApi.waba_id) {
+      return res.json({ 
+        success: false, 
+        msg: "Meta API credentials not found",
+        data: []
+      });
+    }
+    
+    // Fetch templates from Meta API
+    const fetch = require("node-fetch");
+    const url = `https://graph.facebook.com/v18.0/${metaApi.waba_id}/message_templates?status=APPROVED&limit=100`;
+    
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${metaApi.access_token}`,
+      },
+    });
+    
+    const result = await response.json();
+    
+    if (result.error) {
+      console.error("Meta API error:", result.error);
+      return res.json({ 
+        success: false, 
+        msg: result.error.message || "Failed to fetch templates",
+        data: []
+      });
+    }
+    
+    // Transform to expected format (M_ID, M_NAME)
+    const templates = (result.data || []).map(template => ({
+      M_ID: template.id,
+      M_NAME: template.name,
+      language: template.language,
+      status: template.status,
+      category: template.category,
+      components: template.components || []
+    }));
+    
+    res.json({ 
+      success: true, 
+      data: templates
+    });
+    
+  } catch (err) {
+    console.error("Error fetching Meta templates:", err);
+    res.json({ 
+      success: false, 
+      msg: "Failed to fetch templates",
+      data: []
+    });
+  }
+});
+
+// ✅ Get single template details for automation flow builder
+router.get("/get-meta-template-details/:templateId", validateUser, async (req, res) => {
+  try {
+    const uid = req.decode.uid;
+    const { templateId } = req.params;
+    
+    // Get Meta API credentials
+    const [metaApi] = await query(
+      `SELECT * FROM meta_api WHERE uid = ? LIMIT 1`,
+      [uid]
+    );
+    
+    if (!metaApi || !metaApi.access_token || !metaApi.waba_id) {
+      return res.json({ 
+        success: false, 
+        msg: "Meta API credentials not found"
+      });
+    }
+    
+    // Fetch template details from Meta API
+    const fetch = require("node-fetch");
+    const url = `https://graph.facebook.com/v18.0/${templateId}`;
+    
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${metaApi.access_token}`,
+      },
+    });
+    
+    const template = await response.json();
+    
+    if (template.error) {
+      console.error("Meta API error:", template.error);
+      return res.json({ 
+        success: false, 
+        msg: template.error.message || "Failed to fetch template details"
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      ...template
+    });
+    
+  } catch (err) {
+    console.error("Error fetching template details:", err);
+    res.json({ 
+      success: false, 
+      msg: "Failed to fetch template details"
+    });
+  }
+});
 
 module.exports = router;

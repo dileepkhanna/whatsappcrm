@@ -446,6 +446,339 @@ router.post(
   },
 );
 
+// ─── SEND FORM (Single) - AUTO HANDLES NEW CONVERSATIONS ─────────────────────
+router.post(
+  "/send-form-auto",
+  validateUser,
+  checkPlan,
+  checkWaForms,
+  async (req, res) => {
+    try {
+      const { id, to, customerName, templateName = "form_invitation" } = req.body;
+      
+      const metaApi = await getMetaConfig(req.decode.uid);
+      if (!metaApi) return res.json({ success: false, msg: "Meta API not configured" });
+
+      const [form] = await query(`SELECT * FROM wa_forms WHERE id = ? AND uid = ?`, [id, req.decode.uid]);
+      if (!form) return res.json({ success: false, msg: "Form not found" });
+
+      const headers = {
+        Authorization: `Bearer ${metaApi.access_token}`,
+        "Content-Type": "application/json"
+      };
+
+      try {
+        // Try sending form directly first (works if conversation is active)
+        console.log(`📋 Attempting to send form directly to ${to}...`);
+        
+        const response = await axios.post(
+          `https://graph.facebook.com/${API_VERSION}/${metaApi.business_phone_number_id}/messages`,
+          {
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to,
+            type: "interactive",
+            interactive: {
+              type: "flow",
+              header: { type: "text", text: form.name },
+              body: { text: form.description || "Please fill out the form below." },
+              footer: { text: "Powered by WhatsApp Flows" },
+              action: {
+                name: "flow",
+                parameters: {
+                  flow_message_version: "3",
+                  flow_token: "TOKEN_" + Date.now(),
+                  flow_id: form.flow_id,
+                  flow_cta: "Open Form",
+                  flow_action: "navigate",
+                  flow_action_payload: { screen: "FORM_SCREEN" }
+                }
+              }
+            }
+          },
+          { headers }
+        );
+
+        console.log(`✅ Form sent directly (conversation was active)`);
+        
+        // ✅ Create or update chat entry in beta_chats
+        try {
+          const chatId = `meta_${to}_${req.decode.uid}`;
+          const existingChat = await query(
+            `SELECT chat_id FROM beta_chats WHERE chat_id = ? LIMIT 1`,
+            [chatId]
+          );
+          
+          const lastMessagePayload = {
+            type: "interactive",
+            metaChatId: response.data.messages[0].id,
+            msgContext: {
+              type: "interactive",
+              interactive: {
+                type: "flow",
+                action: {
+                  name: "flow",
+                  parameters: { flow_id: form.flow_id }
+                }
+              }
+            },
+            reaction: "",
+            timestamp: Math.floor(Date.now() / 1000),
+            senderName: metaApi.business_phone_number_id,
+            senderMobile: metaApi.business_phone_number_id,
+            star: "0",
+            route: "OUTGOING",
+            context: null,
+            origin: "meta"
+          };
+          
+          if (existingChat.length === 0) {
+            await query(
+              `INSERT INTO beta_chats 
+               (uid, chat_id, sender_mobile, sender_name, last_message, origin, unread_count, createdAt, updatedAt) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+              [
+                req.decode.uid,
+                chatId,
+                to,
+                customerName || to,
+                JSON.stringify(lastMessagePayload),
+                'meta',
+                0
+              ]
+            );
+          } else {
+            await query(
+              `UPDATE beta_chats 
+               SET last_message = ?, updatedAt = NOW() 
+               WHERE chat_id = ?`,
+              [JSON.stringify(lastMessagePayload), chatId]
+            );
+          }
+          
+          await query(
+            `INSERT INTO beta_conversation 
+             (type, chat_id, uid, status, metaChatId, msgContext, reaction, timestamp, senderName, senderMobile, star, route, context, origin, createdAt, sentBy) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
+            [
+              'interactive',
+              chatId,
+              req.decode.uid,
+              null,
+              response.data.messages[0].id,
+              JSON.stringify({
+                type: "interactive",
+                interactive: {
+                  type: "flow",
+                  action: { name: "flow", parameters: { flow_id: form.flow_id } }
+                }
+              }),
+              "",
+              Math.floor(Date.now() / 1000),
+              metaApi.business_phone_number_id,
+              metaApi.business_phone_number_id,
+              "0",
+              "OUTGOING",
+              null,
+              "meta",
+              "bot"
+            ]
+          );
+        } catch (chatErr) {
+          console.error(`⚠️  Failed to create chat entry:`, chatErr);
+        }
+        
+        return res.json({
+          success: true,
+          msg: "Form sent successfully",
+          messageId: response.data.messages[0].id,
+          method: "direct"
+        });
+
+      } catch (directError) {
+        // If error code 131030 (not engaged), send template first then retry
+        if (directError.response?.data?.error?.code === 131030) {
+          console.log(`⚠️  Customer not engaged (error 131030), sending template first...`);
+          
+          try {
+            // Send template to initiate conversation
+            await axios.post(
+              `https://graph.facebook.com/${API_VERSION}/${metaApi.business_phone_number_id}/messages`,
+              {
+                messaging_product: "whatsapp",
+                to,
+                type: "template",
+                template: {
+                  name: templateName,
+                  language: { code: "en_US" },
+                  components: [{
+                    type: "body",
+                    parameters: [{ type: "text", text: customerName || "there" }]
+                  }]
+                }
+              },
+              { headers }
+            );
+            
+            console.log(`✅ Template sent, waiting 4 seconds before sending form...`);
+            
+            // Wait for template to be delivered
+            await new Promise(resolve => setTimeout(resolve, 4000));
+            
+            // Retry sending form
+            console.log(`📋 Retrying form send...`);
+            
+            const retryResponse = await axios.post(
+              `https://graph.facebook.com/${API_VERSION}/${metaApi.business_phone_number_id}/messages`,
+              {
+                messaging_product: "whatsapp",
+                recipient_type: "individual",
+                to,
+                type: "interactive",
+                interactive: {
+                  type: "flow",
+                  header: { type: "text", text: form.name },
+                  body: { text: form.description || "Please fill out the form below." },
+                  footer: { text: "Powered by WhatsApp Flows" },
+                  action: {
+                    name: "flow",
+                    parameters: {
+                      flow_message_version: "3",
+                      flow_token: "TOKEN_" + Date.now(),
+                      flow_id: form.flow_id,
+                      flow_cta: "Open Form",
+                      flow_action: "navigate",
+                      flow_action_payload: { screen: "FORM_SCREEN" }
+                    }
+                  }
+                }
+              },
+              { headers }
+            );
+
+            console.log(`✅ Form sent successfully after template`);
+
+            // ✅ Create or update chat entry in beta_chats
+            try {
+              const chatId = `meta_${to}_${req.decode.uid}`;
+              const existingChat = await query(
+                `SELECT chat_id FROM beta_chats WHERE chat_id = ? LIMIT 1`,
+                [chatId]
+              );
+              
+              const lastMessagePayload = {
+                type: "interactive",
+                metaChatId: retryResponse.data.messages[0].id,
+                msgContext: {
+                  type: "interactive",
+                  interactive: {
+                    type: "flow",
+                    action: {
+                      name: "flow",
+                      parameters: { flow_id: form.flow_id }
+                    }
+                  }
+                },
+                reaction: "",
+                timestamp: Math.floor(Date.now() / 1000),
+                senderName: metaApi.business_phone_number_id,
+                senderMobile: metaApi.business_phone_number_id,
+                star: "0",
+                route: "OUTGOING",
+                context: null,
+                origin: "meta"
+              };
+              
+              if (existingChat.length === 0) {
+                await query(
+                  `INSERT INTO beta_chats 
+                   (uid, chat_id, sender_mobile, sender_name, last_message, origin, unread_count, createdAt, updatedAt) 
+                   VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                  [
+                    req.decode.uid,
+                    chatId,
+                    to,
+                    customerName || to,
+                    JSON.stringify(lastMessagePayload),
+                    'meta',
+                    0
+                  ]
+                );
+              } else {
+                await query(
+                  `UPDATE beta_chats 
+                   SET last_message = ?, updatedAt = NOW() 
+                   WHERE chat_id = ?`,
+                  [JSON.stringify(lastMessagePayload), chatId]
+                );
+              }
+              
+              await query(
+                `INSERT INTO beta_conversation 
+                 (type, chat_id, uid, status, metaChatId, msgContext, reaction, timestamp, senderName, senderMobile, star, route, context, origin, createdAt, sentBy) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
+                [
+                  'interactive',
+                  chatId,
+                  req.decode.uid,
+                  null,
+                  retryResponse.data.messages[0].id,
+                  JSON.stringify({
+                    type: "interactive",
+                    interactive: {
+                      type: "flow",
+                      action: { name: "flow", parameters: { flow_id: form.flow_id } }
+                    }
+                  }),
+                  "",
+                  Math.floor(Date.now() / 1000),
+                  metaApi.business_phone_number_id,
+                  metaApi.business_phone_number_id,
+                  "0",
+                  "OUTGOING",
+                  null,
+                  "meta",
+                  "bot"
+                ]
+              );
+            } catch (chatErr) {
+              console.error(`⚠️  Failed to create chat entry:`, chatErr);
+            }
+
+            return res.json({
+              success: true,
+              msg: "Template sent first, then form sent successfully (new conversation started)",
+              messageId: retryResponse.data.messages[0].id,
+              method: "template+form",
+              note: "Customer was not engaged, so we sent an approved template message first to start the conversation."
+            });
+            
+          } catch (templateError) {
+            console.error(`❌ Template or retry failed:`, templateError.response?.data);
+            return res.json({
+              success: false,
+              msg: `Failed to send template or form: ${templateError.response?.data?.error?.message || templateError.message}`,
+              error: templateError.response?.data,
+              suggestion: `Make sure you have an approved template named "${templateName}" in your Meta Business Manager`
+            });
+          }
+        } else {
+          // Other error, not the "not engaged" issue
+          throw directError;
+        }
+      }
+
+    } catch (err) {
+      console.error("❌ Error in send-form-auto:", err.response?.data || err);
+      res.json({
+        success: false,
+        msg: err.response?.data?.error?.message || "Something went wrong",
+        error: err.response?.data || err.message
+      });
+    }
+  }
+);
+
 // ─── SEND FORM (Single) ───────────────────────────────────────────────────────
 router.post(
   "/send-form",
@@ -499,6 +832,105 @@ router.post(
           },
         },
       );
+
+      // ✅ Create or update chat entry in beta_chats
+      try {
+        const chatId = `meta_${to}_${req.decode.uid}`;
+        const existingChat = await query(
+          `SELECT chat_id FROM beta_chats WHERE chat_id = ? LIMIT 1`,
+          [chatId]
+        );
+        
+        const lastMessagePayload = {
+          type: "interactive",
+          metaChatId: response.data.messages[0].id,
+          msgContext: {
+            type: "interactive",
+            interactive: {
+              type: "flow",
+              action: {
+                name: "flow",
+                parameters: {
+                  flow_id: form.flow_id
+                }
+              }
+            }
+          },
+          reaction: "",
+          timestamp: Math.floor(Date.now() / 1000),
+          senderName: metaApi.business_phone_number_id,
+          senderMobile: metaApi.business_phone_number_id,
+          star: "0",
+          route: "OUTGOING",
+          context: null,
+          origin: "meta"
+        };
+        
+        if (existingChat.length === 0) {
+          // Create new chat entry
+          await query(
+            `INSERT INTO beta_chats 
+             (uid, chat_id, sender_mobile, sender_name, last_message, origin, unread_count, createdAt, updatedAt) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            [
+              req.decode.uid,
+              chatId,
+              to,
+              to, // We don't have name in this endpoint
+              JSON.stringify(lastMessagePayload),
+              'meta',
+              0
+            ]
+          );
+          console.log(`✅ Created new chat entry for form: ${chatId}`);
+        } else {
+          // Update existing chat
+          await query(
+            `UPDATE beta_chats 
+             SET last_message = ?, updatedAt = NOW() 
+             WHERE chat_id = ?`,
+            [JSON.stringify(lastMessagePayload), chatId]
+          );
+          console.log(`✅ Updated existing chat entry for form: ${chatId}`);
+        }
+        
+        // Also create conversation entry for tracking
+        await query(
+          `INSERT INTO beta_conversation 
+           (type, chat_id, uid, status, metaChatId, msgContext, reaction, timestamp, senderName, senderMobile, star, route, context, origin, createdAt, sentBy) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
+          [
+            'interactive',
+            chatId,
+            req.decode.uid,
+            null,
+            response.data.messages[0].id,
+            JSON.stringify({
+              type: "interactive",
+              interactive: {
+                type: "flow",
+                action: {
+                  name: "flow",
+                  parameters: { flow_id: form.flow_id }
+                }
+              }
+            }),
+            "",
+            Math.floor(Date.now() / 1000),
+            metaApi.business_phone_number_id,
+            metaApi.business_phone_number_id,
+            "0",
+            "OUTGOING",
+            null,
+            "meta",
+            "bot"
+          ]
+        );
+        console.log(`✅ Created conversation entry for form message`);
+      } catch (chatErr) {
+        console.error(`⚠️  Failed to create chat entry:`, chatErr);
+        // Don't fail the request, form was sent successfully
+      }
 
       res.json({
         success: true,
@@ -609,6 +1041,93 @@ router.post(
           
           results.success++;
           console.log(`✅ Form sent to ${contact.mobile} (${i+1}/${contacts.length})`);
+          
+          // ✅ Create or update chat entry in beta_chats
+          try {
+            const chatId = `meta_${contact.mobile}_${req.decode.uid}`;
+            const existingChat = await query(
+              `SELECT chat_id FROM beta_chats WHERE chat_id = ? LIMIT 1`,
+              [chatId]
+            );
+            
+            const lastMessagePayload = {
+              type: "interactive",
+              metaChatId: response.data.messages[0].id,
+              msgContext: {
+                type: "interactive",
+                interactive: {
+                  type: "flow",
+                  action: {
+                    name: "flow",
+                    parameters: { flow_id: form.flow_id }
+                  }
+                }
+              },
+              reaction: "",
+              timestamp: Math.floor(Date.now() / 1000),
+              senderName: metaApi.business_phone_number_id,
+              senderMobile: metaApi.business_phone_number_id,
+              star: "0",
+              route: "OUTGOING",
+              context: null,
+              origin: "meta"
+            };
+            
+            if (existingChat.length === 0) {
+              await query(
+                `INSERT INTO beta_chats 
+                 (uid, chat_id, sender_mobile, sender_name, last_message, origin, unread_count, createdAt, updatedAt) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                [
+                  req.decode.uid,
+                  chatId,
+                  contact.mobile,
+                  contact.name || contact.mobile,
+                  JSON.stringify(lastMessagePayload),
+                  'meta',
+                  0
+                ]
+              );
+            } else {
+              await query(
+                `UPDATE beta_chats 
+                 SET last_message = ?, updatedAt = NOW() 
+                 WHERE chat_id = ?`,
+                [JSON.stringify(lastMessagePayload), chatId]
+              );
+            }
+            
+            await query(
+              `INSERT INTO beta_conversation 
+               (type, chat_id, uid, status, metaChatId, msgContext, reaction, timestamp, senderName, senderMobile, star, route, context, origin, createdAt, sentBy) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
+              [
+                'interactive',
+                chatId,
+                req.decode.uid,
+                null,
+                response.data.messages[0].id,
+                JSON.stringify({
+                  type: "interactive",
+                  interactive: {
+                    type: "flow",
+                    action: { name: "flow", parameters: { flow_id: form.flow_id } }
+                  }
+                }),
+                "",
+                Math.floor(Date.now() / 1000),
+                metaApi.business_phone_number_id,
+                metaApi.business_phone_number_id,
+                "0",
+                "OUTGOING",
+                null,
+                "meta",
+                "bot"
+              ]
+            );
+          } catch (chatErr) {
+            console.error(`⚠️  Failed to create chat entry for ${contact.mobile}:`, chatErr);
+          }
           
           // Wait 1 second between messages (rate limiting)
           if (i < contacts.length - 1) {

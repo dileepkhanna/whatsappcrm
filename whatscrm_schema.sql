@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS `plan` (
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `web_public` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `app_name` varchar(255) DEFAULT 'WhatsCRM',
+  `app_name` varchar(255) DEFAULT 'eswarigroup',
   `logo` varchar(255) DEFAULT NULL,
   `custom_home` text DEFAULT NULL,
   `is_custom_home` tinyint(1) DEFAULT 0,
@@ -724,6 +724,7 @@ CREATE TABLE IF NOT EXISTS `testimonial` (
   `description` text DEFAULT NULL,
   `reviewer_name` varchar(255) DEFAULT NULL,
   `reviewer_position` varchar(255) DEFAULT NULL,
+  `image` varchar(255) DEFAULT NULL,
   `createdAt` datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -924,6 +925,6 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- ============================================================
 -- Seed required single-row config tables
 -- ============================================================
-INSERT IGNORE INTO `web_public` (`id`, `app_name`, `currency_code`, `currency_symbol`) VALUES (1, 'WhatsCRM', 'USD', '$');
+INSERT IGNORE INTO `web_public` (`id`, `app_name`, `currency_code`, `currency_symbol`) VALUES (1, 'eswarigroup', 'USD', '$');
 INSERT IGNORE INTO `web_private` (`id`) VALUES (1);
 INSERT IGNORE INTO `mobile_app` (`id`) VALUES (1);

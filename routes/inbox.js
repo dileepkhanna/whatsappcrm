@@ -86,18 +86,45 @@ function appendWebhookToFile(data) {
 // WhatsApp Webhook Verification
 router.get("/embed/webhook/:uid", async (req, res) => {
   try {
-    const [admin] = await query(`SELECT uid FROM admin LIMIT 1`);
-    if (!admin) {
+    const { uid } = req.params;
+    
+    // Check if it's a user UID or admin UID
+    const [user] = await query(`SELECT uid FROM user WHERE uid = ?`, [uid]);
+    const [admin] = await query(`SELECT uid FROM admin WHERE uid = ?`, [uid]);
+    
+    let VERIFY_TOKEN = null;
+    
+    if (user) {
+      VERIFY_TOKEN = user.uid;
+    } else if (admin) {
+      VERIFY_TOKEN = admin.uid;
+    } else {
+      // Fallback to first admin UID for backward compatibility
+      const [firstAdmin] = await query(`SELECT uid FROM admin LIMIT 1`);
+      if (firstAdmin) {
+        VERIFY_TOKEN = firstAdmin.uid;
+      }
+    }
+    
+    if (!VERIFY_TOKEN) {
+      console.error('❌ No valid UID found for webhook verification');
       return res.sendStatus(400);
     }
-
-    const VERIFY_TOKEN = admin.uid;
 
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
 
+    console.log('📥 Webhook verification request:', {
+      mode,
+      token,
+      challenge: challenge ? 'exists' : 'missing',
+      expectedToken: VERIFY_TOKEN,
+      providedUID: uid
+    });
+
     if (!mode || !token) {
+      console.error('❌ Missing mode or token in webhook verification');
       return res.sendStatus(400);
     }
 
@@ -106,9 +133,10 @@ router.get("/embed/webhook/:uid", async (req, res) => {
       return res.status(200).send(challenge);
     }
 
+    console.error('❌ Webhook verification failed: token mismatch');
     return res.sendStatus(403);
   } catch (err) {
-    console.error(err);
+    console.error('❌ Webhook verification error:', err);
     return res.sendStatus(500);
   }
 });
@@ -1248,6 +1276,276 @@ router.get("/import_chats_from_v3", validateUser, async (req, res) => {
   } catch (err) {
     console.log(err);
     res.json({ err, success: false, msg: "Something went wrong" });
+  }
+});
+
+// ✅ START NEW CONVERSATION - Create chat for new number
+router.post("/start_new_conversation", validateUser, async (req, res) => {
+  try {
+    const { phone, name } = req.body;
+
+    if (!phone) {
+      return res.json({ success: false, msg: "Phone number is required" });
+    }
+
+    // Clean phone number (remove spaces, dashes, plus sign, etc.)
+    const cleanPhone = phone.replace(/[^\d]/g, ''); // Remove everything except digits
+
+    // Generate chat_id
+    const chatId = `meta_${cleanPhone}_${req.decode.uid}`;
+
+    // Check if chat already exists
+    const existingChat = await query(
+      `SELECT * FROM beta_chats WHERE chat_id = ? LIMIT 1`,
+      [chatId]
+    );
+
+    if (existingChat.length > 0) {
+      // Chat already exists, return it
+      return res.json({
+        success: true,
+        msg: "Chat already exists",
+        chatId: existingChat[0].chat_id,
+        data: existingChat[0]
+      });
+    }
+
+    // Create new chat entry
+    const lastMessagePayload = {
+      type: "text",
+      metaChatId: "",
+      msgContext: {
+        type: "text",
+        text: {
+          body: "New conversation started"
+        }
+      },
+      reaction: "",
+      timestamp: Math.floor(Date.now() / 1000),
+      senderName: name || cleanPhone,
+      senderMobile: cleanPhone,
+      star: "0",
+      route: "OUTGOING",
+      context: null,
+      origin: "meta"
+    };
+
+    await query(
+      `INSERT INTO beta_chats 
+       (uid, chat_id, sender_mobile, sender_name, last_message, origin, unread_count, createdAt, updatedAt) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        req.decode.uid,
+        chatId,
+        cleanPhone,
+        name || cleanPhone,
+        JSON.stringify(lastMessagePayload),
+        'meta',
+        0
+      ]
+    );
+
+    console.log(`✅ New conversation started: ${chatId}`);
+
+    // Fetch the created chat
+    const newChat = await query(
+      `SELECT * FROM beta_chats WHERE chat_id = ? LIMIT 1`,
+      [chatId]
+    );
+
+    res.json({
+      success: true,
+      msg: "New conversation created successfully",
+      chatId: chatId,
+      data: newChat[0]
+    });
+  } catch (err) {
+    console.error("Error starting new conversation:", err);
+    res.json({ success: false, msg: "Something went wrong", err: err.message });
+  }
+});
+
+// Start new conversation with template message
+router.post("/start_conversation_with_template", validateUser, async (req, res) => {
+  try {
+    const { phone, name, templateName, templateLanguage, templateVariables } = req.body;
+
+    if (!phone || !templateName) {
+      return res.json({ 
+        success: false, 
+        msg: "Phone number and template name are required" 
+      });
+    }
+
+    // Clean phone number
+    const cleanPhone = phone.replace(/[^\d]/g, '');
+    
+    if (!cleanPhone) {
+      return res.json({
+        success: false,
+        msg: "Invalid phone number format"
+      });
+    }
+
+    // Get user's Meta API credentials
+    const [metaApi] = await query(
+      `SELECT * FROM meta_api WHERE uid = ? LIMIT 1`,
+      [req.decode.uid]
+    );
+
+    if (!metaApi || !metaApi.access_token || !metaApi.business_phone_number_id) {
+      return res.json({
+        success: false,
+        msg: "Meta WhatsApp API not configured. Please link your Meta WhatsApp first."
+      });
+    }
+
+    // Generate chat_id
+    const chatId = `meta_${cleanPhone}_${req.decode.uid}`;
+    
+    // Check if chat already exists for this phone number
+    const existingChatByPhone = await query(
+      `SELECT * FROM beta_chats 
+       WHERE uid = ? 
+       AND sender_mobile = ? 
+       AND origin = 'meta'
+       LIMIT 1`,
+      [req.decode.uid, cleanPhone]
+    );
+    
+    // If chat exists with different chat_id format, update to new format
+    if (existingChatByPhone.length > 0 && existingChatByPhone[0].chat_id !== chatId) {
+      console.log(`⚠️ Found existing chat with old format. Updating to new format...`);
+      const oldChatId = existingChatByPhone[0].chat_id;
+      
+      // Update chat_id to new format
+      await query(
+        `UPDATE beta_chats SET chat_id = ? WHERE chat_id = ? AND uid = ?`,
+        [chatId, oldChatId, req.decode.uid]
+      );
+      
+      // Update all conversations with new chat_id
+      await query(
+        `UPDATE beta_conversation SET chat_id = ? WHERE chat_id = ? AND uid = ?`,
+        [chatId, oldChatId, req.decode.uid]
+      );
+      
+      console.log(`✅ Migrated chat from ${oldChatId} to ${chatId}`);
+    }
+
+    console.log(`📤 Starting conversation with template: ${templateName} to ${cleanPhone}`);
+
+    // Send template message via Meta API
+    const { sendTemplateMessage } = require("../functions/function.js");
+    
+    const templateResponse = await sendTemplateMessage(
+      'v21.0', // API version
+      metaApi.business_phone_number_id, // Phone Number ID
+      metaApi.access_token, // Access Token
+      templateName, // Template Name
+      templateLanguage || 'en', // Language
+      cleanPhone, // Recipient Phone
+      templateVariables || [], // Body Variables
+      null, // Header Variable
+      [] // Button Variables
+    );
+
+    if (!templateResponse || templateResponse.error) {
+      console.error('❌ Template send failed:', templateResponse?.error);
+      return res.json({
+        success: false,
+        msg: templateResponse?.error?.message || "Failed to send template message"
+      });
+    }
+
+    console.log('✅ Template message sent:', templateResponse);
+
+    // Create/Update chat entry
+    const existingChat = await query(
+      `SELECT * FROM beta_chats WHERE chat_id = ? LIMIT 1`,
+      [chatId]
+    );
+
+    const lastMessagePayload = {
+      type: "template",
+      metaChatId: templateResponse.messages?.[0]?.id || "",
+      msgContext: {
+        type: "template",
+        template: {
+          name: templateName,
+          language: templateLanguage || 'en',
+          components: templateVariables || []
+        }
+      },
+      reaction: "",
+      timestamp: Math.floor(Date.now() / 1000),
+      senderName: name || cleanPhone,
+      senderMobile: cleanPhone,
+      star: "0",
+      route: "OUTGOING",
+      context: null,
+      origin: "meta"
+    };
+
+    if (existingChat.length > 0) {
+      // Update existing chat
+      await query(
+        `UPDATE beta_chats 
+         SET last_message = ?, updatedAt = NOW()
+         WHERE chat_id = ?`,
+        [JSON.stringify(lastMessagePayload), chatId]
+      );
+    } else {
+      // Create new chat
+      await query(
+        `INSERT INTO beta_chats 
+         (uid, chat_id, sender_mobile, sender_name, last_message, origin, unread_count, createdAt, updatedAt) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [
+          req.decode.uid,
+          chatId,
+          cleanPhone,
+          name || cleanPhone,
+          JSON.stringify(lastMessagePayload),
+          'meta',
+          0
+        ]
+      );
+    }
+
+    // Save conversation record
+    await query(
+      `INSERT INTO beta_conversation 
+       (uid, chat_id, type, msgContext, timestamp, senderName, senderMobile, route, origin, createdAt) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        req.decode.uid,
+        chatId,
+        'template',
+        JSON.stringify(lastMessagePayload.msgContext),
+        lastMessagePayload.timestamp,
+        name || cleanPhone,
+        cleanPhone,
+        'OUTGOING',
+        'meta'
+      ]
+    );
+
+    console.log(`✅ Conversation started with template: ${chatId}`);
+
+    res.json({
+      success: true,
+      msg: "Template message sent successfully",
+      chatId: chatId,
+      messageId: templateResponse.messages?.[0]?.id
+    });
+  } catch (err) {
+    console.error("❌ Error starting conversation with template:", err);
+    res.json({ 
+      success: false, 
+      msg: "Something went wrong", 
+      error: err.message 
+    });
   }
 });
 

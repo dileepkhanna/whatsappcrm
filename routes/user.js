@@ -658,7 +658,119 @@ router.get("/get_me", validateUser, async (req, res) => {
   }
 });
 
-// update notes
+// Get shared files for a chat
+router.get("/chats/:chatId/files", validateUser, async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    
+    console.log('🔍 Fetching shared files for chat:', chatId);
+    
+    // Get all media messages (image, video, document, audio) for this chat
+    const files = await query(
+      `SELECT 
+        id,
+        type,
+        msgContext,
+        timestamp,
+        senderName,
+        createdAt
+      FROM beta_conversation 
+      WHERE chat_id = ? 
+        AND uid = ? 
+        AND type IN ('image', 'video', 'document', 'audio', 'sticker')
+      ORDER BY timestamp DESC`,
+      [chatId, req.decode.uid]
+    );
+    
+    console.log(`📁 Found ${files.length} media messages`);
+    
+    // Parse and format file data
+    const formattedFiles = files.map((file, index) => {
+      let fileData = {};
+      try {
+        console.log(`\n📄 Processing file ${index + 1}:`, {
+          id: file.id,
+          type: file.type,
+          msgContext: typeof file.msgContext === 'string' ? file.msgContext.substring(0, 300) + '...' : JSON.stringify(file.msgContext).substring(0, 300) + '...'
+        });
+        
+        let context = typeof file.msgContext === 'string' 
+          ? JSON.parse(file.msgContext) 
+          : file.msgContext;
+        
+        console.log('📋 Context keys:', Object.keys(context));
+        console.log('📋 Full context:', JSON.stringify(context, null, 2));
+        
+        // Extract file URL and details based on type
+        if (file.type === 'image') {
+          const imgData = context.image || context;
+          fileData = {
+            url: imgData.link || imgData.url || imgData.id,
+            caption: imgData.caption,
+            mimeType: imgData.mime_type || imgData.mimetype || 'image/jpeg'
+          };
+        } else if (file.type === 'video') {
+          const vidData = context.video || context;
+          fileData = {
+            url: vidData.link || vidData.url || vidData.id,
+            caption: vidData.caption,
+            mimeType: vidData.mime_type || vidData.mimetype || 'video/mp4'
+          };
+        } else if (file.type === 'document') {
+          const docData = context.document || context;
+          fileData = {
+            url: docData.link || docData.url || docData.id,
+            filename: docData.filename || docData.name,
+            caption: docData.caption,
+            mimeType: docData.mime_type || docData.mimetype || 'application/octet-stream'
+          };
+        } else if (file.type === 'audio') {
+          const audData = context.audio || context;
+          fileData = {
+            url: audData.link || audData.url || audData.id,
+            mimeType: audData.mime_type || audData.mimetype || 'audio/mpeg'
+          };
+        } else if (file.type === 'sticker') {
+          const stickerData = context.sticker || context;
+          fileData = {
+            url: stickerData.link || stickerData.url || stickerData.id,
+            mimeType: stickerData.mime_type || stickerData.mimetype || 'image/webp'
+          };
+        }
+        
+        console.log('✅ Extracted file data:', fileData);
+      } catch (err) {
+        console.error('❌ Error parsing message context:', err);
+      }
+      
+      return {
+        id: file.id,
+        type: file.type,
+        ...fileData,
+        timestamp: file.timestamp,
+        senderName: file.senderName,
+        createdAt: file.createdAt
+      };
+    }).filter(file => {
+      const hasUrl = !!file.url;
+      console.log(`🔍 File ${file.id} (${file.type}) has URL:`, hasUrl, file.url);
+      return hasUrl;
+    }); // Only include files with valid URLs
+    
+    console.log(`✅ Returning ${formattedFiles.length} formatted files`);
+    
+    res.json({ 
+      success: true, 
+      data: formattedFiles,
+      count: formattedFiles.length
+    });
+  } catch (err) {
+    console.error('❌ Error fetching shared files:', err);
+    res.json({ success: false, msg: "Failed to fetch shared files", err: err.message });
+  }
+});
+
+
 router.post(
   "/save_note",
   validateUser,
@@ -666,12 +778,22 @@ router.post(
   checkNote,
   async (req, res) => {
     try {
-      const { chatId, note } = req.body;
+      const { chatId, note, rating } = req.body;
 
-      await query(`UPDATE chats SET chat_note = ? WHERE chat_id = ?`, [
-        note,
-        chatId,
-      ]);
+      // Update note and rating if provided
+      // Rating should be 0-10 (if chat_rating column exists in beta_chats)
+      if (rating !== undefined && rating !== null) {
+        await query(
+          `UPDATE beta_chats SET chat_note = ?, chat_rating = ? WHERE chat_id = ?`,
+          [note, rating, chatId]
+        );
+      } else {
+        await query(`UPDATE beta_chats SET chat_note = ? WHERE chat_id = ?`, [
+          note,
+          chatId,
+        ]);
+      }
+      
       res.json({ success: true, msg: "Notes were updated" });
     } catch (err) {
       res.json({ success: false, msg: "something went wrong", err });
@@ -963,9 +1085,45 @@ router.get("/get_meta_keys", validateUser, async (req, res) => {
   }
 });
 
+// Get template media URL
+router.get("/get_template_media/:templateName", validateUser, async (req, res) => {
+  try {
+    const { templateName } = req.params;
+
+    console.log('📥 Fetching template media for:', templateName);
+
+    // Get media from database
+    const mediaData = await query(
+      `SELECT file_name FROM meta_templet_media WHERE uid = ? AND templet_name = ? ORDER BY id DESC LIMIT 1`,
+      [req.decode.uid, templateName]
+    );
+
+    if (mediaData.length > 0) {
+      // Use the request protocol and host to build the URL
+      // This way it works with both localhost and ngrok
+      const protocol = req.protocol;
+      const host = req.get('host');
+      const url = `${protocol}://${host}/media/${mediaData[0].file_name}`;
+      
+      console.log('✅ Template media found:', url);
+      console.log('🌐 Using protocol:', protocol, 'host:', host);
+      
+      return res.json({ success: true, url });
+    } else {
+      console.log('ℹ️ No media found for template:', templateName);
+      return res.json({ success: false, msg: 'No media found for this template' });
+    }
+  } catch (err) {
+    console.error('Error fetching template media:', err);
+    res.json({ success: false, msg: 'Failed to fetch template media' });
+  }
+});
+
 // add meta templet
 router.post("/add_meta_templet", validateUser, checkPlan, async (req, res) => {
   try {
+    console.log('Template creation request body:', JSON.stringify(req.body, null, 2));
+    
     const getAPIKEYS = await query(`SELECT * FROM meta_api WHERE uid = ?`, [
       req.decode.uid,
     ]);
@@ -977,6 +1135,8 @@ router.post("/add_meta_templet", validateUser, checkPlan, async (req, res) => {
       });
     }
 
+    console.log('Creating template with WABA ID:', getAPIKEYS[0]?.waba_id);
+
     const resp = await createMetaTemplet(
       "v18.0",
       getAPIKEYS[0]?.waba_id,
@@ -984,18 +1144,30 @@ router.post("/add_meta_templet", validateUser, checkPlan, async (req, res) => {
       req.body,
     );
 
-    if (resp.error) {
-      res.json({ msg: resp?.error?.error_user_msg || resp?.error?.message });
+    console.log('Meta API response:', JSON.stringify(resp, null, 2));
+
+    if (resp?.error) {
+      console.error('Meta API error:', resp.error);
+      return res.json({ 
+        success: false,
+        msg: resp?.error?.error_user_msg || resp?.error?.message || "Failed to create template",
+        error: resp?.error
+      });
     } else {
-      console.log(resp);
-      res.json({
+      console.log('Template created successfully:', resp);
+      return res.json({
         msg: "Templet was added and waiting for the review",
         success: true,
+        data: resp
       });
     }
   } catch (err) {
-    res.json({ success: false, msg: "something went wrong", err });
-    console.log(err);
+    console.error('Template creation exception:', err);
+    return res.json({ 
+      success: false, 
+      msg: "Something went wrong while creating template",
+      error: err.message 
+    });
   }
 });
 
@@ -1072,17 +1244,439 @@ router.post("/del_meta_templet", validateUser, async (req, res) => {
   }
 });
 
+// ========================================
+// KANBAN API ENDPOINTS
+// ========================================
+
+// Get all chats for kanban view
+router.get("/kanban/chats", validateUser, async (req, res) => {
+  try {
+    const chats = await query(
+      `SELECT 
+        id,
+        chat_id,
+        sender_name,
+        sender_mobile,
+        last_message,
+        unread_count,
+        profile as profile_pic,
+        chat_label,
+        kanban_order,
+        updatedAt,
+        createdAt
+      FROM beta_chats
+      WHERE uid = ?
+      ORDER BY kanban_order ASC, updatedAt DESC`,
+      [req.decode.uid]
+    );
+    
+    res.json({
+      success: true,
+      data: chats,
+    });
+  } catch (err) {
+    console.error('Get kanban chats error:', err);
+    res.json({ success: false, msg: "Something went wrong", error: err.message });
+  }
+});
+
+// Update chat label
+router.post("/kanban/update-label", validateUser, async (req, res) => {
+  try {
+    const { chatId, label } = req.body;
+    
+    if (!chatId) {
+      return res.json({ success: false, msg: "Chat ID is required" });
+    }
+    
+    // Update the chat label
+    await query(
+      `UPDATE beta_chats 
+      SET chat_label = ? 
+      WHERE chat_id = ? AND uid = ?`,
+      [label || null, chatId, req.decode.uid]
+    );
+    
+    res.json({
+      success: true,
+      msg: "Chat label updated successfully",
+    });
+  } catch (err) {
+    console.error('Update chat label error:', err);
+    res.json({ success: false, msg: "Something went wrong", error: err.message });
+  }
+});
+
+// Get custom labels
+router.get("/kanban/labels", validateUser, async (req, res) => {
+  try {
+    const labels = await query(
+      `SELECT id, name, color, createdAt
+      FROM kanban_labels
+      WHERE uid = ?
+      ORDER BY createdAt ASC`,
+      [req.decode.uid]
+    );
+    
+    res.json({
+      success: true,
+      data: labels,
+    });
+  } catch (err) {
+    console.error('Get labels error:', err);
+    res.json({ success: false, msg: "Something went wrong", error: err.message });
+  }
+});
+
+// Create new label
+router.post("/kanban/create-label", validateUser, async (req, res) => {
+  try {
+    const { name, color } = req.body;
+    
+    if (!name || !color) {
+      return res.json({ success: false, msg: "Name and color are required" });
+    }
+    
+    const result = await query(
+      `INSERT INTO kanban_labels (uid, name, color) VALUES (?, ?, ?)`,
+      [req.decode.uid, name, color]
+    );
+    
+    res.json({
+      success: true,
+      msg: "Label created successfully",
+      labelId: result.insertId,
+    });
+  } catch (err) {
+    console.error('Create label error:', err);
+    res.json({ success: false, msg: "Something went wrong", error: err.message });
+  }
+});
+
+// Delete label
+router.delete("/kanban/labels/:labelId", validateUser, async (req, res) => {
+  try {
+    const { labelId } = req.params;
+    
+    await query(
+      `DELETE FROM kanban_labels WHERE id = ? AND uid = ?`,
+      [labelId, req.decode.uid]
+    );
+    
+    res.json({
+      success: true,
+      msg: "Label deleted successfully",
+    });
+  } catch (err) {
+    console.error('Delete label error:', err);
+    res.json({ success: false, msg: "Something went wrong", error: err.message });
+  }
+});
+
+// Update kanban order
+router.post("/kanban/update-order", validateUser, async (req, res) => {
+  try {
+    const { chatId, order } = req.body;
+    
+    if (!chatId || order === undefined) {
+      return res.json({ success: false, msg: "Chat ID and order are required" });
+    }
+    
+    await query(
+      `UPDATE beta_chats 
+      SET kanban_order = ? 
+      WHERE chat_id = ? AND uid = ?`,
+      [order, chatId, req.decode.uid]
+    );
+    
+    res.json({
+      success: true,
+      msg: "Kanban order updated successfully",
+    });
+  } catch (err) {
+    console.error('Update kanban order error:', err);
+    res.json({ success: false, msg: "Something went wrong", error: err.message });
+  }
+});
+
+// ========================================
+// INBOX API ENDPOINTS
+// ========================================
+
+// Get all chats/conversations
+router.get("/chats", validateUser, async (req, res) => {
+  try {
+    const { filter = 'all' } = req.query;
+    
+    let query_str = `
+      SELECT 
+        bc.id,
+        bc.chat_id,
+        bc.sender_name as contact_name,
+        bc.sender_mobile as contact_phone,
+        bc.last_message,
+        bc.unread_count,
+        bc.profile as profile_pic,
+        bc.chat_label,
+        bc.chat_note,
+        bc.origin,
+        bc.assigned_agent,
+        bc.updatedAt as last_message_time,
+        bc.createdAt
+      FROM beta_chats bc
+      WHERE bc.uid = ?
+    `;
+    
+    // Apply filters
+    if (filter === 'unread') {
+      query_str += ` AND bc.unread_count > 0`;
+    } else if (filter === 'read') {
+      query_str += ` AND bc.unread_count = 0`;
+    }
+    
+    query_str += ` ORDER BY bc.updatedAt DESC`;
+    
+    const chats = await query(query_str, [req.decode.uid]);
+    
+    res.json({
+      success: true,
+      data: chats,
+      total: chats.length,
+      unread: chats.filter(c => c.unread_count > 0).length
+    });
+  } catch (err) {
+    console.error('Get chats error:', err);
+    res.json({ success: false, msg: "Something went wrong", error: err.message });
+  }
+});
+
+// Get messages for a specific chat
+router.get("/chats/:chatId/messages", validateUser, async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { limit = 50, offset = 0 } = req.query;
+    
+    // Get chat info
+    const [chatInfo] = await query(
+      `SELECT * FROM beta_chats WHERE chat_id = ? AND uid = ?`,
+      [chatId, req.decode.uid]
+    );
+    
+    if (!chatInfo) {
+      return res.json({ success: false, msg: "Chat not found" });
+    }
+    
+    // Get messages - ordered DESC to get recent messages first, then reverse for display
+    const messages = await query(
+      `SELECT 
+        id,
+        type,
+        chat_id,
+        status,
+        sentBy,
+        msgContext,
+        reaction,
+        timestamp,
+        senderName,
+        senderMobile,
+        star,
+        origin,
+        createdAt
+      FROM beta_conversation 
+      WHERE chat_id = ? AND uid = ?
+      ORDER BY timestamp DESC, id DESC
+      LIMIT ? OFFSET ?`,
+      [chatId, req.decode.uid, parseInt(limit), parseInt(offset)]
+    );
+    
+    // Reverse to show oldest first in UI (chat history order)
+    messages.reverse();
+    
+    // Parse msgContext for each message
+    const parsedMessages = messages.map(msg => ({
+      ...msg,
+      msgContext: msg.msgContext ? JSON.parse(msg.msgContext) : null
+    }));
+    
+    res.json({
+      success: true,
+      data: {
+        chat: chatInfo,
+        messages: parsedMessages
+      }
+    });
+  } catch (err) {
+    console.error('Get messages error:', err);
+    res.json({ success: false, msg: "Something went wrong", error: err.message });
+  }
+});
+
+// Send a message
+router.post("/chats/:chatId/messages", validateUser, async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { message, mediaUrl, type = 'text' } = req.body;
+    
+    if (!message && !mediaUrl) {
+      return res.json({ success: false, msg: "Message or media is required" });
+    }
+    
+    // Get chat info
+    const [chatInfo] = await query(
+      `SELECT * FROM beta_chats WHERE chat_id = ? AND uid = ?`,
+      [chatId, req.decode.uid]
+    );
+    
+    if (!chatInfo) {
+      return res.json({ success: false, msg: "Chat not found" });
+    }
+    
+    // Create message context
+    const msgContext = {
+      type: type,
+      text: message || '',
+      mediaUrl: mediaUrl || null
+    };
+    
+    const timestamp = Date.now();
+    
+    // Insert message
+    const result = await query(
+      `INSERT INTO beta_conversation 
+      (type, chat_id, uid, status, sentBy, msgContext, timestamp, origin) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        type,
+        chatId,
+        req.decode.uid,
+        'sent',
+        'user',
+        JSON.stringify(msgContext),
+        timestamp,
+        chatInfo.origin || 'web'
+      ]
+    );
+    
+    // Update chat last message
+    await query(
+      `UPDATE beta_chats 
+      SET last_message = ?, updatedAt = NOW() 
+      WHERE chat_id = ? AND uid = ?`,
+      [message || 'Media', chatId, req.decode.uid]
+    );
+    
+    res.json({
+      success: true,
+      msg: "Message sent successfully",
+      messageId: result.insertId
+    });
+  } catch (err) {
+    console.error('Send message error:', err);
+    res.json({ success: false, msg: "Something went wrong", error: err.message });
+  }
+});
+
+// Mark chat as read
+router.post("/chats/:chatId/mark-read", validateUser, async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    
+    await query(
+      `UPDATE beta_chats 
+      SET unread_count = 0 
+      WHERE chat_id = ? AND uid = ?`,
+      [chatId, req.decode.uid]
+    );
+    
+    res.json({
+      success: true,
+      msg: "Chat marked as read"
+    });
+  } catch (err) {
+    console.error('Mark as read error:', err);
+    res.json({ success: false, msg: "Something went wrong", error: err.message });
+  }
+});
+
+// Archive chat
+router.post("/chats/:chatId/archive", validateUser, async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    
+    // Add a status field to beta_chats if not exists (handled in database migration)
+    await query(
+      `UPDATE beta_chats 
+      SET chat_label = 'archived' 
+      WHERE chat_id = ? AND uid = ?`,
+      [chatId, req.decode.uid]
+    );
+    
+    res.json({
+      success: true,
+      msg: "Chat archived successfully"
+    });
+  } catch (err) {
+    console.error('Archive chat error:', err);
+    res.json({ success: false, msg: "Something went wrong", error: err.message });
+  }
+});
+
+// Delete chat (conversation)
+router.delete("/chats/:chatId", validateUser, async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    
+    console.log(`🗑️ Deleting chat: ${chatId} for user: ${req.decode.uid}`);
+    
+    // Delete all conversations for this chat
+    const conversationsDeleted = await query(
+      `DELETE FROM beta_conversation 
+       WHERE chat_id = ? AND uid = ?`,
+      [chatId, req.decode.uid]
+    );
+    
+    // Delete the chat entry
+    const chatDeleted = await query(
+      `DELETE FROM beta_chats 
+       WHERE chat_id = ? AND uid = ?`,
+      [chatId, req.decode.uid]
+    );
+    
+    console.log(`✅ Chat deleted: ${chatDeleted.affectedRows} chat, ${conversationsDeleted.affectedRows} messages`);
+    
+    res.json({
+      success: true,
+      msg: "Chat deleted successfully",
+      deletedConversations: conversationsDeleted.affectedRows,
+      deletedChats: chatDeleted.affectedRows
+    });
+  } catch (err) {
+    console.error('❌ Delete chat error:', err);
+    res.status(500).json({ 
+      success: false, 
+      msg: "Failed to delete chat", 
+      error: err.message 
+    });
+  }
+});
+
 // return meta media url
 router.post("/return_media_url_meta", validateUser, async (req, res) => {
   try {
+    console.log('📤 Media upload request received');
+    console.log('Body:', req.body);
+    console.log('Files:', req.files ? Object.keys(req.files) : 'No files');
+
     if (!req.body?.templet_name) {
+      console.log('❌ No template name provided');
       return res.json({
         success: false,
-        msg: "Please give a templet name first ",
+        msg: "Please give a templet name first",
       });
     }
 
     if (!req.files || Object.keys(req.files).length === 0) {
+      console.log('❌ No files uploaded');
       return res.json({ success: false, msg: "No files were uploaded" });
     }
 
@@ -1090,6 +1684,7 @@ router.post("/return_media_url_meta", validateUser, async (req, res) => {
       req.decode.uid,
     ]);
     if (getMETA.length < 1) {
+      console.log('❌ No Meta API keys found for user');
       return res.json({
         success: false,
         msg: "Please check your meta API keys",
@@ -1100,55 +1695,116 @@ router.post("/return_media_url_meta", validateUser, async (req, res) => {
     const file = req.files.file;
 
     const filename = `${randomString}.${getFileExtension(file.name)}`;
+    const mediaDir = `${__dirname}/../client/public/media`;
+    const filePath = `${mediaDir}/${filename}`;
+
+    console.log('📁 Saving file to:', filePath);
+
+    // Ensure media directory exists
+    const fs = require('fs');
+    if (!fs.existsSync(mediaDir)) {
+      console.log('📁 Creating media directory');
+      fs.mkdirSync(mediaDir, { recursive: true });
+    }
 
     // Move the file and wait for it to complete
     await new Promise((resolve, reject) => {
-      file.mv(`${__dirname}/../client/public/media/${filename}`, (err) => {
+      file.mv(filePath, (err) => {
         if (err) {
-          console.log(err);
+          console.error('❌ File move error:', err);
           reject(err);
         } else {
+          console.log('✅ File saved successfully');
           resolve();
         }
       });
     });
 
-    setTimeout(async () => {
-      const { fileSizeInBytes, mimeType } = await getFileInfo(
-        `${__dirname}/../client/public/media/${filename}`,
-      );
+    // Verify file exists after move
+    let retries = 0;
+    const maxRetries = 10;
+    while (!fs.existsSync(filePath) && retries < maxRetries) {
+      console.log(`⏳ Waiting for file to be accessible (attempt ${retries + 1}/${maxRetries})...`);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      retries++;
+    }
 
-      const getSession = await getSessionUploadMediaMeta(
-        "v18.0",
-        getMETA[0]?.app_id,
-        getMETA[0]?.access_token,
-        fileSizeInBytes,
-        mimeType,
-      );
+    if (!fs.existsSync(filePath)) {
+      console.error('❌ File does not exist after move operation');
+      return res.json({ 
+        success: false, 
+        msg: "File upload failed - file not found after save" 
+      });
+    }
 
-      const uploadFile = await uploadFileMeta(
-        getSession?.id,
-        `${__dirname}/../client/public/media/${filename}`,
-        "v18.0",
-        getMETA[0]?.access_token,
-      );
+    console.log('✅ File verified to exist at:', filePath);
 
-      if (!uploadFile?.success) {
-        return res.json({ success: false, msg: "Please check your meta API" });
-      }
+    // Get file info
+    const { fileSizeInBytes, mimeType } = await getFileInfo(filePath);
+    console.log('📊 File info:', { fileSizeInBytes, mimeType });
 
-      const url = `${process.env.FRONTENDURI}/media/${filename}`;
+    // Get upload session from Meta
+    const getSession = await getSessionUploadMediaMeta(
+      "v18.0",
+      getMETA[0]?.app_id,
+      getMETA[0]?.access_token,
+      fileSizeInBytes,
+      mimeType,
+    );
 
-      await query(
-        `INSERT INTO meta_templet_media (uid, templet_name, meta_hash, file_name) VALUES (?,?,?,?)`,
-        [req.decode.uid, req.body?.templet_name, uploadFile?.data?.h, filename],
-      );
+    console.log('🔑 Upload session:', getSession);
 
-      res.json({ success: true, url, hash: uploadFile?.data?.h });
-    }, 1000);
+    if (!getSession?.id) {
+      console.error('❌ Failed to get upload session');
+      return res.json({ 
+        success: false, 
+        msg: "Failed to create upload session with Meta" 
+      });
+    }
+
+    // Upload file to Meta
+    const uploadFile = await uploadFileMeta(
+      getSession.id,
+      filePath,
+      "v18.0",
+      getMETA[0]?.access_token,
+    );
+
+    console.log('📤 Upload result:', uploadFile);
+
+    if (!uploadFile?.success) {
+      console.error('❌ Upload to Meta failed');
+      return res.json({ 
+        success: false, 
+        msg: "Failed to upload to Meta. Please check your meta API credentials" 
+      });
+    }
+
+    const url = `${process.env.FRONTENDURI}/media/${filename}`;
+
+    // Meta returns the full handle in the 'h' field
+    // The entire 'h' value is the handle that Meta needs
+    let metaHandle = uploadFile?.data?.h;
+    
+    // If the handle contains newlines (multiple handles), take the first one
+    if (metaHandle && typeof metaHandle === 'string' && metaHandle.includes('\n')) {
+      metaHandle = metaHandle.split('\n')[0].trim();
+    }
+
+    console.log('Meta handle to use:', metaHandle);
+
+    // Save to database
+    await query(
+      `INSERT INTO meta_templet_media (uid, templet_name, meta_hash, file_name) VALUES (?,?,?,?)`,
+      [req.decode.uid, req.body?.templet_name, metaHandle, filename],
+    );
+
+    console.log('✅ Media upload complete:', { url, hash: metaHandle });
+
+    res.json({ success: true, url, hash: metaHandle });
   } catch (err) {
-    res.json({ success: false, msg: "something went wrong", err });
-    console.log(err);
+    console.error('❌ Error in media upload:', err);
+    res.json({ success: false, msg: "Upload failed: " + err.message });
   }
 });
 
@@ -1844,7 +2500,7 @@ router.post("/send_resovery", async (req, res) => {
     console.log('✅ User found:', checkEmailValid[0].uid);
 
     const getWeb = await query(`SELECT * FROM web_public`, []);
-    const appName = getWeb[0]?.app_name || 'WhatsCRM';
+    const appName = getWeb[0]?.app_name || 'eswarigroup';
 
     const jsontoken = sign(
       {
@@ -2976,7 +3632,18 @@ router.post("/send_template_message", validateUser, async (req, res) => {
       body_variables = [],
       header_variable = null,
       button_variables = [],
+      campaign_id = null, // Optional campaign tracking
     } = req.body;
+
+    console.log('📤 Sending template message:', {
+      template_name,
+      recipient_phone,
+      hasCampaignId: !!campaign_id,
+      body_variables_count: body_variables.length,
+      has_header_variable: !!header_variable,
+      header_variable_type: header_variable?.type,
+      header_variable_url: header_variable?.url,
+    });
 
     // Validate required fields
     if (!template_name || !recipient_phone) {
@@ -2988,6 +3655,7 @@ router.post("/send_template_message", validateUser, async (req, res) => {
 
     // Format phone number (ensure it has country code)
     const formattedPhone = formatPhoneNumber(recipient_phone);
+    console.log('📞 Formatted phone:', formattedPhone);
 
     // Get user's Meta API credentials
     const getMETA = await query(`SELECT * FROM meta_api WHERE uid = ?`, [
@@ -3001,20 +3669,109 @@ router.post("/send_template_message", validateUser, async (req, res) => {
       });
     }
 
-    // Send the template message
-    const response = await sendTemplateMessage(
-      "v18.0",
-      getMETA[0]?.business_phone_number_id,
-      getMETA[0]?.access_token,
-      template_name,
-      template_language,
-      formattedPhone,
-      body_variables,
-      header_variable,
-      button_variables,
-    );
+    console.log('🔑 Meta API Config:', {
+      phone_number_id: getMETA[0]?.business_phone_number_id,
+      has_access_token: !!getMETA[0]?.access_token,
+      token_length: getMETA[0]?.access_token?.length,
+    });
+
+    // 🔍 Auto-detect if this is a carousel or catalog template
+    let templateType = "STANDARD";
+    let templateStructure = null;
+    let response;
+    
+    try {
+      const { getAllTempletsMeta } = require("../functions/function");
+      const templatesResponse = await getAllTempletsMeta(
+        "v18.0",
+        getMETA[0].waba_id,
+        getMETA[0].access_token
+      );
+      
+      if (templatesResponse && templatesResponse.data) {
+        const matchingTemplate = templatesResponse.data.find(
+          t => t.name === template_name
+        );
+        
+        if (matchingTemplate && matchingTemplate.components) {
+          templateStructure = matchingTemplate; // Store full template structure
+          
+          // Check if template has CAROUSEL component
+          const hasCarousel = matchingTemplate.components.some(
+            c => c.type === "CAROUSEL"
+          );
+          const hasCatalog = matchingTemplate.components.some(
+            c => c.type === "BUTTONS" && c.buttons?.some(b => b.type === "CATALOG")
+          );
+          
+          if (hasCarousel) {
+            templateType = "CAROUSEL";
+            console.log(`🎨 Auto-detected CAROUSEL template: ${template_name}`);
+            console.log(`📋 Template has ${matchingTemplate.components.find(c => c.type === "CAROUSEL")?.cards?.length || 0} cards`);
+          } else if (hasCatalog) {
+            templateType = "CATALOG";
+            console.log(`🛍️ Auto-detected CATALOG template: ${template_name}`);
+          }
+        }
+      }
+    } catch (detectError) {
+      console.error(`⚠️ Failed to auto-detect template type:`, detectError.message);
+      // Continue with STANDARD type
+    }
+
+    // Send template based on detected type
+    if (templateType === "CAROUSEL") {
+      const { sendCarouselTemplateMessage } = require("../loops/campaignBeta");
+      
+      // Extract card count from template structure
+      const carouselComponent = templateStructure?.components?.find(c => c.type === "CAROUSEL");
+      const cardCount = carouselComponent?.cards?.length || 2;
+      
+      // Carousel templates: no header/button variables, body variables might exist
+      response = await sendCarouselTemplateMessage(
+        "v18.0",
+        getMETA[0]?.business_phone_number_id,
+        getMETA[0]?.access_token,
+        template_name,
+        template_language,
+        formattedPhone,
+        body_variables, // Global body variables (if any)
+        cardCount, // Pass card count instead of empty cards array
+        templateStructure // Pass full template structure for reference
+      );
+    } else if (templateType === "CATALOG") {
+      const { sendCatalogTemplateMessage } = require("../loops/campaignBeta");
+      
+      response = await sendCatalogTemplateMessage(
+        "v18.0",
+        getMETA[0]?.business_phone_number_id,
+        getMETA[0]?.access_token,
+        template_name,
+        template_language,
+        formattedPhone,
+        body_variables,
+        null // thumbnail
+      );
+    } else {
+      // Standard template
+      response = await sendTemplateMessage(
+        "v18.0",
+        getMETA[0]?.business_phone_number_id,
+        getMETA[0]?.access_token,
+        template_name,
+        template_language,
+        formattedPhone,
+        body_variables,
+        header_variable,
+        button_variables,
+      );
+    }
+
+    console.log('📨 Meta API Response:', JSON.stringify(response, null, 2));
 
     if (response?.error) {
+      console.log('❌ Template message failed:', response.error.message);
+      console.log('❌ Full error:', JSON.stringify(response.error, null, 2));
       return res.json({
         success: false,
         msg: response?.error?.message || "Failed to send template message",
@@ -3022,13 +3779,20 @@ router.post("/send_template_message", validateUser, async (req, res) => {
       });
     }
 
+    console.log('✅ Template message sent successfully to:', recipient_phone);
+    console.log('✅ Message ID:', response?.messages?.[0]?.id);
+
+    // Return success with meta_msg_id for campaign tracking
     res.json({
       success: true,
       msg: "Template message sent successfully",
       data: response,
+      meta_msg_id: response?.messages?.[0]?.id || null,
+      recipient_phone: formattedPhone,
     });
   } catch (err) {
-    console.error("Error sending template message:", err);
+    console.error("❌ Error sending template message:", err);
+    console.error("❌ Error stack:", err.stack);
     res.json({
       success: false,
       msg: "Something went wrong while sending the template",
@@ -3721,6 +4485,44 @@ router.post("/fix_meta_api_uid", validateUser, async (req, res) => {
   } catch (err) {
     res.json({ success: false, msg: "something went wrong", err });
     console.log(err);
+  }
+});
+
+// Get phonebooks with contact counts
+router.get("/get-phonebooks", validateUser, async (req, res) => {
+  try {
+    // Get all phonebooks for the user
+    const phonebooks = await query(
+      `SELECT id, name, createdAt FROM phonebook WHERE uid = ? ORDER BY name ASC`,
+      [req.decode.uid]
+    );
+
+    // Get contact count for each phonebook
+    const phonebooksWithCounts = await Promise.all(
+      phonebooks.map(async (phonebook) => {
+        const [countResult] = await query(
+          `SELECT COUNT(*) as count FROM contact WHERE phonebook_id = ? AND uid = ?`,
+          [phonebook.id, req.decode.uid]
+        );
+        
+        return {
+          ...phonebook,
+          contacts_count: countResult.count || 0
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      data: phonebooksWithCounts
+    });
+  } catch (err) {
+    console.error("Error fetching phonebooks:", err);
+    res.json({ 
+      success: false, 
+      msg: "Failed to fetch phonebooks", 
+      error: err.message 
+    });
   }
 });
 

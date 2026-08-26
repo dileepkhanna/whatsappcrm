@@ -121,12 +121,18 @@ async function sendCarouselTemplateMessage(
   language,
   recipientPhone,
   globalBodyVariables = [],
-  cards = [],
+  cardCount = 2,
+  templateStructure = null,
 ) {
   const url = `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`;
 
+  // 🎨 CAROUSEL TEMPLATES: Per Meta's documentation
+  // We need to send carousel component with card_index for each card
+  // Images are baked into template, so NO header parameters needed
+  
   const components = [];
-
+  
+  // Add global body component if there are variables
   if (globalBodyVariables.length > 0) {
     components.push({
       type: "body",
@@ -137,47 +143,38 @@ async function sendCarouselTemplateMessage(
     });
   }
 
-  const builtCards = cards.map((card, index) => {
+  // Build carousel component
+  // For carousel templates: each card has HEADER (image) and BODY components
+  // Images are baked into template, so we send empty parameters for header
+  const carouselCards = [];
+  
+  for (let i = 0; i < cardCount; i++) {
     const cardComponents = [];
-
-    if (card.imageUrl) {
-      cardComponents.push({
-        type: "header",
-        parameters: [{ type: "image", image: { link: card.imageUrl } }],
-      });
-    }
-
-    if (card.bodyVariables?.length > 0) {
-      cardComponents.push({
-        type: "body",
-        parameters: card.bodyVariables.map((v) => ({
-          type: "text",
-          text: String(v || ""),
-        })),
-      });
-    }
-
-    if (card.buttonVariables?.length > 0) {
-      card.buttonVariables.forEach((bv, bi) => {
-        cardComponents.push({
-          type: "button",
-          sub_type: "url",
-          index: String(bv.index ?? bi),
-          parameters: [{ type: "text", text: String(bv.value || bv || "") }],
-        });
-      });
-    }
-
-    return { card_index: index, components: cardComponents };
-  });
-
-  if (builtCards.length > 0) {
-    components.push({
-      type: "carousel",
-      cards: builtCards,
+    
+    // Add header component with NO parameters (image is baked into template)
+    // Meta requires header component to be present but with empty parameters array
+    cardComponents.push({
+      type: "header",
+      parameters: [], // Empty - image is from template definition
+    });
+    
+    // Add body component with NO parameters (text is baked into template)
+    cardComponents.push({
+      type: "body",
+      parameters: [], // Empty - body text is from template definition
+    });
+    
+    carouselCards.push({
+      card_index: i,
+      components: cardComponents,
     });
   }
-
+  
+  components.push({
+    type: "carousel",
+    cards: carouselCards,
+  });
+  
   const payload = {
     messaging_product: "whatsapp",
     to: recipientPhone,
@@ -189,7 +186,10 @@ async function sendCarouselTemplateMessage(
     },
   };
 
+  console.log(`🎨 Sending carousel template with ${cardCount} cards:`, JSON.stringify(payload, null, 2));
+
   try {
+    console.log(`🌐 Sending request to: https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`);
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -198,7 +198,10 @@ async function sendCarouselTemplateMessage(
       },
       body: JSON.stringify(payload),
     });
-    return await response.json();
+    
+    const result = await response.json();
+    console.log('📨 Meta API Response:', JSON.stringify(result, null, 2));
+    return result;
   } catch (error) {
     console.error("Error sending carousel template:", error);
     throw error;
@@ -328,12 +331,52 @@ async function processSingleCampaign(campaign) {
     console.error(`Error parsing campaign variables: ${e.message}`);
   }
 
-  const templateType =
-    headerVariable?.type === "CAROUSEL"
-      ? "CAROUSEL"
-      : headerVariable?.type === "CATALOG"
-        ? "CATALOG"
-        : "STANDARD";
+  // 🔍 Auto-detect template type if header_variable is null
+  // This handles campaigns created without specifying template type
+  let templateType = "STANDARD";
+  
+  if (headerVariable?.type === "CAROUSEL") {
+    templateType = "CAROUSEL";
+  } else if (headerVariable?.type === "CATALOG") {
+    templateType = "CATALOG";
+  } else if (!headerVariable || headerVariable === null) {
+    // Fetch template from Meta to detect type
+    try {
+      const { getAllTempletsMeta } = require("../functions/function");
+      const templatesResponse = await getAllTempletsMeta(
+        "v18.0",
+        metaCredentials[0].waba_id,
+        metaCredentials[0].access_token
+      );
+      
+      if (templatesResponse && templatesResponse.data) {
+        const matchingTemplate = templatesResponse.data.find(
+          t => t.name === campaign.template_name
+        );
+        
+        if (matchingTemplate && matchingTemplate.components) {
+          // Check if template has CAROUSEL component
+          const hasCarousel = matchingTemplate.components.some(
+            c => c.type === "CAROUSEL"
+          );
+          const hasCatalog = matchingTemplate.components.some(
+            c => c.type === "BUTTONS" && c.buttons?.some(b => b.type === "CATALOG")
+          );
+          
+          if (hasCarousel) {
+            templateType = "CAROUSEL";
+            console.log(`🎨 Auto-detected CAROUSEL template: ${campaign.template_name}`);
+          } else if (hasCatalog) {
+            templateType = "CATALOG";
+            console.log(`🛍️ Auto-detected CATALOG template: ${campaign.template_name}`);
+          }
+        }
+      }
+    } catch (detectError) {
+      console.error(`⚠️ Failed to auto-detect template type:`, detectError.message);
+      // Continue with STANDARD type
+    }
+  }
 
   const credentials = metaCredentials[0];
   const successfulIds = [];
@@ -413,6 +456,98 @@ async function processSingleCampaign(campaign) {
 
       if (result && result.messages && result.messages.length > 0) {
         successfulIds.push({ id: log.id, messageId: result.messages[0].id });
+        
+        // ✅ FIX: Create or update chat entry in beta_chats when campaign message is sent
+        try {
+          // Check if chat already exists
+          const chatId = `meta_${log.contact_mobile}_${campaign.uid}`;
+          const existingChat = await query(
+            `SELECT chat_id FROM beta_chats WHERE chat_id = ? LIMIT 1`,
+            [chatId]
+          );
+          
+          const lastMessagePayload = {
+            type: "template",
+            metaChatId: result.messages[0].id,
+            msgContext: {
+              type: "template",
+              template: {
+                name: campaign.template_name,
+                language: campaign.template_language
+              }
+            },
+            reaction: "",
+            timestamp: Math.floor(Date.now() / 1000),
+            senderName: credentials.business_phone_number_id,
+            senderMobile: credentials.business_phone_number_id,
+            star: "0",
+            route: "OUTGOING",
+            context: null,
+            origin: "meta"
+          };
+          
+          if (existingChat.length === 0) {
+            // Create new chat entry
+            await query(
+              `INSERT INTO beta_chats 
+               (uid, chat_id, sender_mobile, sender_name, last_message, origin, unread_count, createdAt, updatedAt) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+              [
+                campaign.uid,
+                chatId,
+                log.contact_mobile,
+                log.contact_name || log.contact_mobile,
+                JSON.stringify(lastMessagePayload),
+                'meta',
+                0
+              ]
+            );
+            console.log(`✅ Created new chat entry for campaign: ${chatId}`);
+          } else {
+            // Update existing chat
+            await query(
+              `UPDATE beta_chats 
+               SET last_message = ?, updatedAt = NOW() 
+               WHERE chat_id = ?`,
+              [JSON.stringify(lastMessagePayload), chatId]
+            );
+            console.log(`✅ Updated existing chat entry for campaign: ${chatId}`);
+          }
+          
+          // Also create conversation entry for tracking
+          await query(
+            `INSERT INTO beta_conversation 
+             (type, chat_id, uid, status, metaChatId, msgContext, reaction, timestamp, senderName, senderMobile, star, route, context, origin, sentBy, createdAt) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+            [
+              'template',
+              chatId,
+              campaign.uid,
+              null,
+              result.messages[0].id,
+              JSON.stringify({
+                type: "template",
+                template: {
+                  name: campaign.template_name,
+                  language: campaign.template_language
+                }
+              }),
+              '',
+              Math.floor(Date.now() / 1000),
+              credentials.business_phone_number_id,
+              credentials.business_phone_number_id,
+              '0',
+              'OUTGOING',
+              null,
+              'meta',
+              'bot'
+            ]
+          );
+          console.log(`✅ Created conversation entry for: ${chatId}`);
+        } catch (chatError) {
+          console.error(`Error creating/updating chat for ${log.contact_mobile}:`, chatError.message);
+          // Don't fail the entire campaign send if chat creation fails
+        }
       } else {
         const errorMsg = result?.error?.message || "No message ID returned";
         failedUpdates.push({ id: log.id, error: errorMsg });

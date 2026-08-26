@@ -143,7 +143,8 @@ playwright-report/
 playwright/.cache/
 
 # ─── Build & Distribution ────────────────────────────────────
-dist/
+# Keep frontend/dist for deployment
+# dist/
 build/
 .next/
 .nuxt/
@@ -207,6 +208,24 @@ auth_info_baileys/
 auth_info_baileys/*
 creds.json
 !auth_info_baileys/.gitkeep
+
+# ─── Frontend Source Code (Deploy only bundles) ──────────────
+# Exclude frontend source code - only deploy built bundles
+frontend/src/
+frontend/public/
+frontend/node_modules/
+frontend/index.html
+frontend/vite.config.js
+frontend/vite.config.ts
+frontend/tsconfig.json
+frontend/tsconfig.node.json
+frontend/package.json
+frontend/package-lock.json
+frontend/.gitignore
+
+# Force include frontend dist folder (built bundles)
+!frontend/dist/
+!frontend/dist/**/*
 
 # ─── MongoDB ─────────────────────────────────────────────────
 # MongoDB dump files

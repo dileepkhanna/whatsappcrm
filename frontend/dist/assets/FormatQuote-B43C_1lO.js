@@ -1,0 +1,1 @@
+import{ot as e}from"./Box-BLXgjf5s.js";import{t}from"./createSvgIcon-BR_8trmA.js";var n=t((0,e().jsx)(`path`,{d:`M6 17h3l2-4V7H5v6h3zm8 0h3l2-4V7h-6v6h3z`}),`FormatQuote`);export{n as t};

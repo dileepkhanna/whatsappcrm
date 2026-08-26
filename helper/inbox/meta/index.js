@@ -386,10 +386,10 @@ async function processMetaMsg({ body, uid }) {
           origin: "meta",
         };
 
-        // ✅ Generate chatId from sender's number
+        // ✅ Generate chatId from sender's number with uid (matching template format)
         const chatId = `meta_${
           extractPhoneNumber(senderMobile) || randomstring.generate(10)
-        }`;
+        }_${uid}`;
 
         await saveMessageToConversation({
           uid,
@@ -417,7 +417,7 @@ async function processMetaMsg({ body, uid }) {
     const fallbackChatId = `meta_${
       extractPhoneNumber(value?.contacts?.[0]?.wa_id) ||
       randomstring.generate(10)
-    }`;
+    }_${uid}`;
 
     return {
       newMessage,

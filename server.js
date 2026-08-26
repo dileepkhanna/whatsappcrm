@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const fileUpload = require("express-fileupload");
 const nodeCleanup = require("node-cleanup");
+const compression = require("compression");
 const { initCampaign } = require("./loops/campaignBeta.js");
 const { init, cleanup } = require("./helper/addon/qr");
 const { warmerLoopInit } = require("./helper/addon/qr/warmer/index.js");
@@ -18,6 +19,7 @@ const currentDir = process.cwd();
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 app.use(cors());
+app.use(compression());
 app.use(fileUpload());
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
@@ -41,6 +43,9 @@ app.use("/api/theme", require("./routes/theme"));
 app.use("/api/insta", require("./routes/insta"));
 app.use("/api/kaban", require("./routes/kaban"));
 app.use("/api/waform", require("./routes/waform"));
+app.use("/api/whatsapp", require("./routes/whatsappFlow"));
+app.use("/api/automation", require("./routes/automation"));
+app.use("/api/advanced_templates", require("./routes/advancedTemplates")); // Carousel & Catalog templates
 
 // ─── Media Streaming Middleware ───────────────────────────────────────────────
 const createMediaMiddleware = (folderPath) => {
@@ -72,6 +77,7 @@ const createMediaMiddleware = (folderPath) => {
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Range");
+      res.setHeader("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Encoding, Content-Length");
     },
     index: false,
     acceptRanges: true,
@@ -82,16 +88,29 @@ app.use("/media", createMediaMiddleware("./client/public/media"));
 app.use("/meta-media", createMediaMiddleware("./client/public/meta-media"));
 
 // ─── Static & Catch-All ───────────────────────────────────────────────────────
-app.use(express.static(path.resolve(currentDir, "./client/public")));
+// Check if frontend build exists, otherwise fallback to old client
+const frontendDistPath = path.resolve(currentDir, "./frontend/dist");
+const clientPublicPath = path.resolve(currentDir, "./client/public");
+
+const staticPath = fs.existsSync(frontendDistPath) ? frontendDistPath : clientPublicPath;
+const indexPath = fs.existsSync(frontendDistPath) 
+  ? path.join(frontendDistPath, "index.html")
+  : path.join(clientPublicPath, "index.html");
+
+console.log(`📂 Serving static files from: ${staticPath}`);
+
+app.use(express.static(staticPath));
 
 app.get("*", function (request, response) {
-  response.sendFile(path.resolve(currentDir, "./client/public", "index.html"));
+  response.sendFile(indexPath);
 });
 
 // ─── Server ───────────────────────────────────────────────────────────────────
 const server = app.listen(process.env.PORT || 3010, () => {
   console.log(`WaCrm server is running on port ${process.env.PORT}`);
   updateLangJsonFromEnglish();
+  
+  server.setTimeout(120000);
   
   // ─── Socket.IO MUST be initialized BEFORE QR module ──────────────────────────
   const { initializeSocket } = require("./socket");

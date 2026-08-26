@@ -1,0 +1,1 @@
+import{M as e,N as t}from"./Box-BLXgjf5s.js";function n(e){return t(`MuiListItemIcon`,e)}var r=e(`MuiListItemIcon`,[`root`,`alignItemsFlexStart`]);export{r as n,n as t};

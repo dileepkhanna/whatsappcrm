@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Status Checker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        
+        .status-card {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #ddd;
+        }
+        
+        .status-card.success {
+            background: #d4edda;
+            border-left-color: #28a745;
+        }
+        
+        .status-card.error {
+            background: #f8d7da;
+            border-left-color: #dc3545;
+        }
+        
+        .status-card.warning {
+            background: #fff3cd;
+            border-left-color: #ffc107;
+        }
+        
+        .status-card.info {
+            background: #d1ecf1;
+            border-left-color: #17a2b8;
+        }
+        
+        .status-title {
+            font-weight: 600;
+            margin-bottom: 10px;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .status-content {
+            color: #555;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+        
+        .code-block {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 16px;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .icon {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            line-height: 20px;
+            text-align: center;
+            border-radius: 50%;
+            font-size: 14px;
+        }
+        
+        .icon.success { background: #28a745; color: white; }
+        .icon.error { background: #dc3545; color: white; }
+        .icon.warning { background: #ffc107; color: #333; }
+        .icon.info { background: #17a2b8; color: white; }
+        
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-right: 10px;
+            margin-top: 10px;
+        }
+        
+        .btn:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+        }
+        
+        .btn.danger {
+            background: #dc3545;
+        }
+        
+        .btn.danger:hover {
+            background: #c82333;
+        }
+        
+        .divider {
+            height: 1px;
+            background: #e0e0e0;
+            margin: 30px 0;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: 150px 1fr;
+            gap: 12px;
+            margin-top: 10px;
+        }
+        
+        .info-label {
+            font-weight: 600;
+            color: #666;
+        }
+        
+        .info-value {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Login Status Checker</h1>
+        <p class="subtitle">Check your current login status and frontend version</p>
+        
+        <div id="loginStatus"></div>
+        <div id="frontendInfo"></div>
+        <div id="tokenInfo"></div>
+        <div id="currentUrl"></div>
+        
+        <div class="divider"></div>
+        
+        <button class="btn" onclick="location.reload()">🔄 Refresh Status</button>
+        <button class="btn" onclick="goToLogin()">🔑 Go to Login</button>
+        <button class="btn danger" onclick="clearAndLogout()">🚪 Clear & Logout</button>
+    </div>
+
+    <script>
+        function decodeToken(token) {
+            try {
+                const base64Url = token.split('.')[1];
+                const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                }).join(''));
+                return JSON.parse(jsonPayload);
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function checkLoginStatus() {
+            const token = localStorage.getItem('wacrm_token');
+            const role = localStorage.getItem('wacrm_role');
+            const loginStatusDiv = document.getElementById('loginStatus');
+            
+            if (!token) {
+                loginStatusDiv.innerHTML = `
+                    <div class="status-card error">
+                        <div class="status-title">
+                            <span class="icon error">✗</span>
+                            Not Logged In
+                        </div>
+                        <div class="status-content">
+                            <p><strong>No authentication token found in localStorage.</strong></p>
+                            <p style="margin-top: 10px;">Possible reasons:</p>
+                            <ul style="margin-left: 20px; margin-top: 5px;">
+                                <li>You haven't logged in yet</li>
+                                <li>Your session expired and was cleared</li>
+                                <li>You're accessing the old frontend bundle</li>
+                                <li>You cleared your browser data</li>
+                            </ul>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            const decoded = decodeToken(token);
+            
+            if (!decoded) {
+                loginStatusDiv.innerHTML = `
+                    <div class="status-card error">
+                        <div class="status-title">
+                            <span class="icon error">✗</span>
+                            Invalid Token
+                        </div>
+                        <div class="status-content">
+                            <p>Token found but cannot be decoded. This token may be corrupted.</p>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            const now = Math.floor(Date.now() / 1000);
+            const isExpired = decoded.exp && decoded.exp < now;
+
+            loginStatusDiv.innerHTML = `
+                <div class="status-card ${isExpired ? 'warning' : 'success'}">
+                    <div class="status-title">
+                        <span class="icon ${isExpired ? 'warning' : 'success'}">${isExpired ? '⚠' : '✓'}</span>
+                        ${isExpired ? 'Token Expired' : 'Logged In Successfully'}
+                    </div>
+                    <div class="status-content">
+                        <div class="info-grid">
+                            <div class="info-label">User ID:</div>
+                            <div class="info-value">${decoded.uid || 'N/A'}</div>
+                            
+                            <div class="info-label">Email:</div>
+                            <div class="info-value">${decoded.email || 'N/A'}</div>
+                            
+                            <div class="info-label">Role:</div>
+                            <div class="info-value">${decoded.role || role || 'N/A'}</div>
+                            
+                            ${decoded.exp ? `
+                                <div class="info-label">Expires:</div>
+                                <div class="info-value">${new Date(decoded.exp * 1000).toLocaleString()}</div>
+                            ` : ''}
+                        </div>
+                        ${isExpired ? '<p style="margin-top: 15px; color: #856404;"><strong>⚠ Your session has expired. Please login again.</strong></p>' : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function checkFrontendVersion() {
+            const frontendInfoDiv = document.getElementById('frontendInfo');
+            const isReactApp = document.getElementById('root') !== null;
+            const currentPath = window.location.pathname;
+            const currentHost = window.location.origin;
+            
+            // Check if we're on the new React frontend by looking for typical React patterns
+            const hasReactRoot = !!document.getElementById('root');
+            const hasViteScript = Array.from(document.querySelectorAll('script')).some(
+                script => script.src.includes('/@vite/') || script.type === 'module'
+            );
+            
+            const isNewFrontend = hasReactRoot && (hasViteScript || currentPath.startsWith('/user') || currentPath.startsWith('/admin'));
+            
+            frontendInfoDiv.innerHTML = `
+                <div class="status-card ${isNewFrontend ? 'success' : 'warning'}">
+                    <div class="status-title">
+                        <span class="icon ${isNewFrontend ? 'success' : 'warning'}">${isNewFrontend ? '✓' : '⚠'}</span>
+                        Frontend Version
+                    </div>
+                    <div class="status-content">
+                        <div class="info-grid">
+                            <div class="info-label">Version:</div>
+                            <div class="info-value"><strong>${isNewFrontend ? 'NEW React Frontend' : 'OLD Bundle (Possibly)'}</strong></div>
+                            
+                            <div class="info-label">Current URL:</div>
+                            <div class="info-value">${window.location.href}</div>
+                            
+                            <div class="info-label">Has React Root:</div>
+                            <div class="info-value">${hasReactRoot ? '✓ Yes' : '✗ No'}</div>
+                            
+                            <div class="info-label">Has Vite:</div>
+                            <div class="info-value">${hasViteScript ? '✓ Yes' : '✗ No'}</div>
+                        </div>
+                        ${!isNewFrontend ? `
+                            <p style="margin-top: 15px; color: #856404;">
+                                <strong>⚠ Warning:</strong> You might be accessing the old frontend. 
+                                The new React frontend should be available at: <code>/user/inbox</code>
+                            </p>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function showTokenDetails() {
+            const token = localStorage.getItem('wacrm_token');
+            const tokenInfoDiv = document.getElementById('tokenInfo');
+            
+            if (!token) {
+                tokenInfoDiv.innerHTML = '';
+                return;
+            }
+
+            tokenInfoDiv.innerHTML = `
+                <div class="status-card info">
+                    <div class="status-title">
+                        <span class="icon info">i</span>
+                        Token Details
+                    </div>
+                    <div class="status-content">
+                        <p><strong>Full JWT Token:</strong></p>
+                        <div class="code-block">${token}</div>
+                        <p style="margin-top: 15px;"><strong>Decoded Payload:</strong></p>
+                        <div class="code-block">${JSON.stringify(decodeToken(token), null, 2)}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function showCurrentUrl() {
+            const currentUrlDiv = document.getElementById('currentUrl');
+            const allLocalStorageKeys = Object.keys(localStorage);
+            
+            currentUrlDiv.innerHTML = `
+                <div class="status-card info">
+                    <div class="status-title">
+                        <span class="icon info">i</span>
+                        Browser Information
+                    </div>
+                    <div class="status-content">
+                        <div class="info-grid">
+                            <div class="info-label">Current URL:</div>
+                            <div class="info-value">${window.location.href}</div>
+                            
+                            <div class="info-label">User Agent:</div>
+                            <div class="info-value">${navigator.userAgent}</div>
+                            
+                            <div class="info-label">Cookies Enabled:</div>
+                            <div class="info-value">${navigator.cookieEnabled ? '✓ Yes' : '✗ No'}</div>
+                        </div>
+                        <p style="margin-top: 15px;"><strong>All localStorage Keys:</strong></p>
+                        <div class="code-block">${allLocalStorageKeys.length > 0 ? allLocalStorageKeys.join(', ') : 'No keys found'}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function goToLogin() {
+            window.location.href = '/login';
+        }
+
+        function clearAndLogout() {
+            if (confirm('Are you sure you want to clear all data and logout?')) {
+                localStorage.clear();
+                sessionStorage.clear();
+                alert('All data cleared! Redirecting to login...');
+                window.location.href = '/login';
+            }
+        }
+
+        // Run checks on page load
+        window.onload = function() {
+            checkLoginStatus();
+            checkFrontendVersion();
+            showTokenDetails();
+            showCurrentUrl();
+        };
+    </script>
+</body>
+</html>

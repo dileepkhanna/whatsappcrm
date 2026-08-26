@@ -704,8 +704,40 @@ async function sendWaMessage({
 }) {
   try {
     let sendMsgId = null;
-    const messageContent = content || node?.data?.content;
+    
+    console.log("🔍 sendWaMessage input:", {
+      hasContent: !!content,
+      hasNodeData: !!node?.data,
+      hasNodeDataContent: !!node?.data?.content,
+      hasNodeDataMessage: !!node?.data?.message,
+      nodeDataKeys: node?.data ? Object.keys(node.data) : [],
+      nodeDataLabel: node?.data?.label,
+      contentParam: content,
+    });
+    
+    let messageContent = content || node?.data?.content;
+    
+    // ✅ Handle beta flow format: node.data.message instead of node.data.content
+    if (!messageContent && node?.data?.message) {
+      console.log("🔄 Converting beta flow message format to standard format");
+      messageContent = {
+        type: "text",
+        text: {
+          body: node.data.message,
+          preview_url: false,
+        },
+      };
+    }
+    
     const messageType = messageContent?.type;
+
+    console.log("📦 sendWaMessage processed:", {
+      hasContent: !!messageContent,
+      messageType,
+      isBetaFormat: !!node?.data?.message,
+      messageText: messageContent?.text?.body || messageContent?.message,
+      finalMessageContent: messageContent,
+    });
 
     // ✅ Check if it's a media message for Meta API
     const isMediaMessage = ["image", "video", "document", "audio"].includes(
@@ -1153,6 +1185,14 @@ async function processSendMessage({
   try {
     const uid = user?.uid;
 
+    console.log("🔍 processSendMessage called with:", {
+      nodeData: node?.data,
+      nodeDataContent: node?.data?.content,
+      nodeDataType: node?.data?.type,
+      nodeDataMessage: node?.data?.message,
+      nodeDataLabel: node?.data?.label,
+    });
+
     const sendMsg = await sendWaMessage({
       message,
       node,
@@ -1167,10 +1207,24 @@ async function processSendMessage({
     );
 
     if (sendMsg) {
+      // ✅ FIX: Handle both standard (node.data.content) and beta flow (node.data.message) formats
+      let msgContext = node?.data?.content;
+      
+      // Beta flows store message in node.data.message - convert to proper msgContext format
+      if (!msgContext && node?.data?.message) {
+        msgContext = {
+          type: "text",
+          text: {
+            body: node.data.message,
+            preview_url: false,
+          },
+        };
+      }
+      
       const messageData = {
-        type: node?.data?.type?.type,
+        type: msgContext?.type || "text",
         metaChatId: sendMsg,
-        msgContext: node?.data?.content,
+        msgContext: msgContext,
         reaction: "",
         timestamp: parseInt(userTimezone) + 1,
         senderName: message.senderName,
@@ -1210,15 +1264,24 @@ async function processSendMessage({
             message?.senderMobile,
           ],
         );
-        return { moveToNextNode: node?.data?.moveToNextNode || false };
+        
+        console.log("📤 Message sent successfully, moving to next node:", {
+          currentNode: node.id,
+          nextNode: n.id,
+          nextNodeType: n.type,
+        });
+        
+        return { moveToNextNode: true }; // ✅ Always move to next node after sending message
       } else {
+        console.log("⚠️ No next node found after message send");
         return {};
       }
     } else {
+      console.log("❌ Message send failed, sendMsg returned null");
       return {};
     }
   } catch (err) {
-    console.log(err);
+    console.log("❌ Error in processSendMessage:", err);
     return {};
   }
 }
@@ -2662,8 +2725,8 @@ async function processSendWaForm({
     } = node.data;
 
     if (!waForm?.flow_id) {
-      console.error("❌ SEND_WA_FORM: No form selected");
-      return { moveToNextNode: node?.data?.moveToNextNode || true };
+      console.error("❌ SEND_WA_FORM: No form selected - flow terminated");
+      return {}; // ✅ Don't move to next node to prevent infinite loop
     }
 
     // ── resolve variables ─────────────────────────────────────────────────
@@ -2678,8 +2741,8 @@ async function processSendWaForm({
     ]);
 
     if (!api?.access_token || !api?.business_phone_number_id) {
-      console.error("❌ SEND_WA_FORM: Meta API credentials not found");
-      return { moveToNextNode: node?.data?.moveToNextNode || true };
+      console.error("❌ SEND_WA_FORM: Meta API credentials not found - flow terminated");
+      return {}; // ✅ Don't move to next node
     }
 
     const waToken = api.access_token;

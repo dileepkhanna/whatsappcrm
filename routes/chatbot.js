@@ -325,15 +325,26 @@ router.post("/add_beta_chatbot", validateUser, checkPlan, async (req, res) => {
     );
     const chatbots = getAllChatbots?.map((x) => JSON.parse(x.origin)) || [];
 
-    if (origin?.code === "META" && chatbots.find((x) => x.code === "META")) {
-      return res.json({
-        msg: "A chatbot is already running for META, please delete that first",
-      });
-    }
-
-    if (
+    // ✅ Allow multiple chatbots for the same origin type (META, QR, etc.)
+    // Only check if the EXACT same origin configuration already exists
+    // Removed: Single META chatbot restriction
+    
+    // Check if exact same origin already exists (same code AND same configuration)
+    if (origin?.code === "META") {
+      // For META, allow multiple chatbots (each can have different flows)
+      // Only block if trying to use the exact same flow_id
+      const existingMetaChatbot = getAllChatbots.find(
+        (x) => x.flow_id === flow_id && JSON.parse(x.origin).code === "META"
+      );
+      if (existingMetaChatbot) {
+        return res.json({
+          msg: "A META chatbot with this flow already exists. Please select a different flow.",
+        });
+      }
+    } else if (
       chatbots.find((x) => x.title === origin?.title && x.code === origin?.code)
     ) {
+      // For other origins (QR, Telegram, Instagram), check by title and code
       return res.json({
         msg: "A chatbot with this origin already exists",
       });
@@ -405,12 +416,36 @@ router.get("/get_beta_chatbots", validateUser, async (req, res) => {
 router.post("/change_beta_bot_status", validateUser, async (req, res) => {
   try {
     const { id, status } = req.body;
+    
+    // If activating a chatbot, first get its origin
+    if (status) {
+      const [chatbot] = await query(
+        `SELECT origin, origin_id FROM beta_chatbot WHERE id = ? AND uid = ?`,
+        [id, req.decode.uid]
+      );
+      
+      if (chatbot) {
+        const origin = JSON.parse(chatbot.origin);
+        
+        // ✅ AUTO-DEACTIVATE: Deactivate all other chatbots with the same origin
+        // This ensures only ONE active chatbot per origin at a time
+        await query(
+          `UPDATE beta_chatbot SET active = 0 WHERE uid = ? AND origin_id = ? AND id != ?`,
+          [req.decode.uid, chatbot.origin_id, id]
+        );
+        
+        console.log(`🔄 Auto-deactivated other ${origin.code} chatbots for user ${req.decode.uid}`);
+      }
+    }
+    
+    // Now activate/deactivate the target chatbot
     await query(`UPDATE beta_chatbot SET active = ? WHERE uid = ? AND id = ?`, [
       status ? 1 : 0,
       req.decode.uid,
       id,
     ]);
-    res.json({ msg: "Satus changed", success: true });
+    
+    res.json({ msg: "Status changed", success: true });
   } catch (err) {
     console.log(err);
     res.json({ success: false, msg: "Something went wrong", err });

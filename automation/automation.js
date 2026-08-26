@@ -16,6 +16,16 @@ async function processFlow({
   webhookVariables = {},
   loopDetection = { visitedNodes: new Map(), startTime: Date.now() }, // Add loop detection
 }) {
+  console.log("⚙️ processFlow STARTED:", {
+    flowId,
+    nodesCount: nodes?.length,
+    edgesCount: edges?.length,
+    senderMobile: message?.senderMobile,
+    incomingText,
+    origin,
+    chatId,
+  });
+
   // ===== LOOP PROTECTION START =====
   const MAX_ITERATIONS = 50; // Maximum total iterations
   const MAX_NODE_VISITS = 3; // Maximum visits to same node
@@ -81,6 +91,13 @@ async function processFlow({
     webhookVariables,
   });
 
+  console.log("📝 Flow session retrieved:", {
+    hasSession: !!flowSession,
+    hasData: !!flowSession?.data,
+    hasNode: !!flowSession?.data?.node,
+    sessionId: flowSession?.id,
+  });
+
   // returning if chat is disabled
   const checkIfDisabled = await flowProcessor.checkIfChatDisabled({
     flowSession,
@@ -110,6 +127,12 @@ async function processFlow({
     });
     return;
   }
+
+  console.log("🔍 Checking flow session node:", {
+    hasNode: !!flowSession?.data?.node,
+    origin,
+    willRetry: !flowSession?.data?.node && origin !== "webhook_automation",
+  });
 
   if (!flowSession?.data?.node && origin !== "webhook_automation") {
     console.log(
@@ -200,6 +223,8 @@ async function processFlow({
 
   switch (node.type) {
     case "SEND_MESSAGE":
+    case "message": // ✅ Support lowercase 'message' type from beta flows
+      console.log("📨 Processing message node...");
       result = await flowProcessor.processSendMessage({
         chatId,
         message,
@@ -234,6 +259,7 @@ async function processFlow({
       break;
 
     case "SEND_WA_FORM":
+    case "waForm": // ✅ Support lowercase 'waForm' type from beta flow builder
       result = await flowProcessor.processSendWaForm({
         chatId,
         message,
@@ -251,6 +277,7 @@ async function processFlow({
       break;
 
     case "SEND_WA_TEMPLATE":
+    case "waTemplate": // ✅ Support lowercase 'waTemplate' type from beta flow builder
       result = await flowProcessor.processSendWaTemplate({
         chatId,
         message,
@@ -268,6 +295,7 @@ async function processFlow({
       break;
 
     case "CONDITION":
+    case "condition": // ✅ Support lowercase from beta flow builder
       result = await flowProcessor.processCondition({
         chatId,
         message,
@@ -285,6 +313,7 @@ async function processFlow({
       break;
 
     case "RESPONSE_SAVER":
+    case "responseSaver": // ✅ Support camelCase from beta flow builder
       result = await flowProcessor.processResponseSaver({
         chatId,
         message,
@@ -302,6 +331,7 @@ async function processFlow({
       break;
 
     case "DISABLE_AUTOREPLY":
+    case "disableAutoReply": // ✅ Support camelCase from beta flow builder
       result = await flowProcessor.processDisableAutoReply({
         chatId,
         message,
@@ -319,6 +349,7 @@ async function processFlow({
       break;
 
     case "MAKE_REQUEST":
+    case "httpRequest": // ✅ Support camelCase from beta flow builder
       result = await flowProcessor.processMakeRequest({
         chatId,
         message,
@@ -336,6 +367,7 @@ async function processFlow({
       break;
 
     case "DELAY":
+    case "delay": // ✅ Support lowercase from beta flow builder
       result = await flowProcessor.processDelay({
         chatId,
         message,
@@ -353,6 +385,7 @@ async function processFlow({
       break;
 
     case "SPREADSHEET":
+    case "googleSheets": // ✅ Support camelCase from beta flow builder
       result = await flowProcessor.processSpreadSheet({
         chatId,
         message,
@@ -370,6 +403,7 @@ async function processFlow({
       break;
 
     case "EMAIL":
+    case "sendEmail": // ✅ Support camelCase from beta flow builder
       result = await flowProcessor.processSendEmail({
         chatId,
         message,
@@ -387,6 +421,7 @@ async function processFlow({
       break;
 
     case "AGENT_TRANSFER":
+    case "agentTransfer": // ✅ Support camelCase from beta flow builder
       result = await flowProcessor.processAgentTransfer({
         chatId,
         message,
@@ -404,6 +439,7 @@ async function processFlow({
       break;
 
     case "AI_TRANSFER":
+    case "aiTransfer": // ✅ Support camelCase from beta flow builder
       result = await flowProcessor.processAiTransfer({
         chatId,
         message,
@@ -421,6 +457,7 @@ async function processFlow({
       break;
 
     case "MYSQL_QUERY":
+    case "mysqlQuery": // ✅ Support camelCase from beta flow builder
       result = await flowProcessor.processMysqlQuery({
         chatId,
         message,
@@ -438,6 +475,7 @@ async function processFlow({
       break;
 
     case "RESET":
+    case "resetSession": // ✅ Support camelCase from beta flow builder
       result = await flowProcessor.processResetSession({
         chatId,
         message,
@@ -454,7 +492,30 @@ async function processFlow({
       });
       break;
 
+    case "SET_CHAT_LABEL":
+    case "chatLabels": // ✅ Support camelCase from beta flow builder
+      result = await flowProcessor.processSetChatLabel({
+        chatId,
+        message,
+        node,
+        origin,
+        sessionId,
+        user,
+        nodes,
+        edges,
+        flowSession,
+        element,
+        variablesObj,
+        incomingText,
+      });
+      break;
+
     default:
+      console.log("⚠️ Unknown node type:", {
+        nodeType: node.type,
+        nodeId: node.id,
+        availableTypes: ["SEND_MESSAGE", "message", "CONDITION", "RESPONSE_SAVER", "etc..."]
+      });
       break;
   }
 
@@ -479,10 +540,12 @@ async function processFlow({
       });
     }, 1000);
   }
-  try {
-  } catch (err) {
-    console.log(err);
-  }
+  
+  console.log("✅ processFlow COMPLETED:", {
+    flowId,
+    nodeType: node?.type,
+    moveToNextNode: result?.moveToNextNode,
+  });
 }
 
 async function processAutomation({
@@ -496,13 +559,16 @@ async function processAutomation({
   const incomingText = flowProcessor.extractBodyText(message);
 
   const { senderMobile, senderName } = message;
-  const userFlows = await flowProcessor.getActiveFlows({
-    uid,
-    origin,
-    sessionId,
-  });
+  
+  // ✅ Skip chatbot flows - they are handled by processWebhook
+  // Get all active automation flows (NOT chatbots)
+  const automationFlows = await query(
+    `SELECT * FROM beta_flows 
+     WHERE uid = ? AND is_active = 1 AND source = 'automation'`,
+    [uid]
+  );
 
-  if (userFlows?.length < 1) {
+  if (automationFlows?.length < 1) {
     return console.log("User does not have any active automation flow");
   }
 
@@ -510,7 +576,7 @@ async function processAutomation({
     return console.log("Invalid message found", message);
   }
 
-  userFlows.forEach(async (element) => {
+  automationFlows.forEach(async (element) => {
     try {
       const flowData = JSON.parse(element.data) || {};
       const nodes = flowData?.nodes || [];
@@ -538,7 +604,7 @@ async function processAutomation({
         loopDetection: { visitedNodes: new Map(), startTime: Date.now() },
       });
     } catch (err) {
-      console.log("[processAutomation] forEach error:", err); // ← ADD
+      console.log("[processAutomation] forEach error:", err);
     }
   });
 }

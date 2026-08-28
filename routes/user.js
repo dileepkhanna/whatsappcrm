@@ -1099,14 +1099,11 @@ router.get("/get_template_media/:templateName", validateUser, async (req, res) =
     );
 
     if (mediaData.length > 0) {
-      // Use the request protocol and host to build the URL
-      // This way it works with both localhost and ngrok
-      const protocol = req.protocol;
-      const host = req.get('host');
-      const url = `${protocol}://${host}/media/${mediaData[0].file_name}`;
+      // Use FRONTENDURI from environment variables to ensure HTTPS in production
+      const url = `${process.env.FRONTENDURI}/media/${mediaData[0].file_name}`;
       
       console.log('✅ Template media found:', url);
-      console.log('🌐 Using protocol:', protocol, 'host:', host);
+      console.log('🌐 Using FRONTENDURI:', process.env.FRONTENDURI);
       
       return res.json({ success: true, url });
     } else {

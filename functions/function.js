@@ -2905,9 +2905,9 @@ function formatPhoneNumber(phone) {
   // Remove any non-digit characters
   let cleaned = phone.replace(/\D/g, "");
 
-  // Ensure it has country code (add default 1 for US if needed)
+  // Ensure it has a country code. A bare 10-digit number defaults to India (91).
   if (cleaned.length === 10) {
-    cleaned = "1" + cleaned;
+    cleaned = "91" + cleaned;
   }
 
   // Add + prefix if not present

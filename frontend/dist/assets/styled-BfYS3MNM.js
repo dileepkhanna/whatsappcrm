@@ -1,0 +1,1 @@
+import{A as e}from"./Box-BLXgjf5s.js";var t=e();export{t};

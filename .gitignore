@@ -227,6 +227,11 @@ frontend/.gitignore
 !frontend/dist/
 !frontend/dist/**/*
 
+# ─── Old Frontend Bundle (legacy client) ────────────────────
+# The old React bundle, kept only as a visual reference. Not deployed
+# and not maintained — keep it out of version control.
+client/
+
 # ─── MongoDB ─────────────────────────────────────────────────
 # MongoDB dump files
 dump/

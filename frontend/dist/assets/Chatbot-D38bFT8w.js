@@ -1,0 +1,1 @@
+import{ot as e}from"./Box-BLXgjf5s.js";import{R as t}from"./index-B6RX123p.js";import n from"./WAChatbotList-C28Ednv2.js";var r=t(),i=e(),a=()=>{let e=(0,r.c)(1),t;return e[0]===Symbol.for(`react.memo_cache_sentinel`)?(t=(0,i.jsx)(n,{}),e[0]=t):t=e[0],t};export{a as default};

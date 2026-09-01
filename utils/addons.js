@@ -17,9 +17,14 @@ function returnAddons() {
   const webPush = checkWebPush();
   const checkInstagram = checkInsta();
 
+  // addON may be an array (legacy) or an object (current env.js). Normalise the AI_BOT check.
+  const aiBotEnabled = Array.isArray(addON)
+    ? addON.includes("AI_BOT")
+    : !!(addON && (addON.ai_bot || addON.aiBot || addON.AI_BOT));
+
   const finalAddon = [
     wooCheck && "WEBHOOK",
-    addON?.includes("AI_BOT") && "AI_BOT",
+    aiBotEnabled && "AI_BOT",
     qrCheck && "QR",
     waCallChceck && "WACALL",
     embedCheck && "EMBED",

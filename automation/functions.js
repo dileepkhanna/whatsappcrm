@@ -1068,7 +1068,14 @@ async function getFlowSession({
     );
 
     if (!flowSession) {
-      const initialFlow = nodes.find((n) => n.id === "initialNode");
+      // Find the initial node tolerantly: by the canonical id "initialNode",
+      // or by any node whose type is initial/INITIAL (covers legacy flows
+      // saved with ids like "initial-1" or "1").
+      const initialFlow =
+        nodes.find((n) => n.id === "initialNode") ||
+        nodes.find(
+          (n) => String(n.type || "").toLowerCase() === "initial",
+        );
       const getEdge = edges.find((e) => e.source === initialFlow?.id);
       const getNode = nodes.find((n) => n.id === getEdge?.target);
 
@@ -2073,8 +2080,10 @@ async function processResetSession({
     const n = nodes.find((n) => n.id === e.target);
     if (!n) return { moveToNextNode: false };
 
-    // Create fresh session starting from initial node
-    const initialFlow = nodes.find((n) => n.id === "initialNode");
+    // Create fresh session starting from initial node (tolerant of legacy ids)
+    const initialFlow =
+      nodes.find((n) => n.id === "initialNode") ||
+      nodes.find((n) => String(n.type || "").toLowerCase() === "initial");
     const getEdge = edges.find((e) => e.source === initialFlow?.id);
     const getNode = nodes.find((n) => n.id === getEdge?.target);
 

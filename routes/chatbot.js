@@ -417,25 +417,14 @@ router.post("/change_beta_bot_status", validateUser, async (req, res) => {
   try {
     const { id, status } = req.body;
     
-    // If activating a chatbot, first get its origin
+    // If activating a chatbot, deactivate ALL other chatbots first.
+    // Only ONE chatbot can be active at a time for the user.
     if (status) {
-      const [chatbot] = await query(
-        `SELECT origin, origin_id FROM beta_chatbot WHERE id = ? AND uid = ?`,
-        [id, req.decode.uid]
+      await query(
+        `UPDATE beta_chatbot SET active = 0 WHERE uid = ? AND id != ?`,
+        [req.decode.uid, id]
       );
-      
-      if (chatbot) {
-        const origin = JSON.parse(chatbot.origin);
-        
-        // ✅ AUTO-DEACTIVATE: Deactivate all other chatbots with the same origin
-        // This ensures only ONE active chatbot per origin at a time
-        await query(
-          `UPDATE beta_chatbot SET active = 0 WHERE uid = ? AND origin_id = ? AND id != ?`,
-          [req.decode.uid, chatbot.origin_id, id]
-        );
-        
-        console.log(`🔄 Auto-deactivated other ${origin.code} chatbots for user ${req.decode.uid}`);
-      }
+      console.log(`🔄 Auto-deactivated all other chatbots for user ${req.decode.uid}`);
     }
     
     // Now activate/deactivate the target chatbot
@@ -461,6 +450,50 @@ router.post("/del_beta_chatbot", validateUser, async (req, res) => {
       req.decode.uid,
     ]);
     res.json({ msg: "Chatbot was deleted", success: true });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "Something went wrong", err });
+  }
+});
+
+// update beta chatbot (title / flow)
+router.post("/update_beta_chatbot", validateUser, async (req, res) => {
+  try {
+    const { id, title, flow } = req.body;
+    if (!id || !title || !flow?.flow_id) {
+      return res.json({ msg: "Please fill all required fields" });
+    }
+
+    // make sure the chatbot belongs to this user
+    const [existing] = await query(
+      `SELECT * FROM beta_chatbot WHERE id = ? AND uid = ?`,
+      [id, req.decode.uid],
+    );
+    if (!existing) {
+      return res.json({ msg: "Chatbot not found" });
+    }
+
+    // validate the selected flow exists and has enough nodes
+    const [getFlow] = await query(
+      `SELECT * FROM beta_flows WHERE flow_id = ? AND uid = ?`,
+      [flow.flow_id, req.decode.uid],
+    );
+    if (!getFlow) {
+      return res.json({ msg: "This flow is not existed" });
+    }
+    const flowNodesEdges = getFlow?.data ? JSON.parse(getFlow.data) : null;
+    if (!flowNodesEdges || flowNodesEdges?.nodes?.length < 2) {
+      return res.json({
+        msg: "This flow does not have enough nodes to start, Please complete the flow",
+      });
+    }
+
+    await query(
+      `UPDATE beta_chatbot SET title = ?, flow_id = ? WHERE id = ? AND uid = ?`,
+      [title, flow.flow_id, id, req.decode.uid],
+    );
+
+    res.json({ success: true, msg: "Chatbot was updated successfully" });
   } catch (err) {
     console.log(err);
     res.json({ success: false, msg: "Something went wrong", err });

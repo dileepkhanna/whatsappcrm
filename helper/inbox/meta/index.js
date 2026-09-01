@@ -21,6 +21,78 @@ function formatMessage(type, content) {
   return { type, [type]: content };
 }
 
+// ✅ Persist a WhatsApp Flow (form) submission and return a human-readable summary.
+// Returns null if the payload could not be parsed.
+async function saveWaFormSubmission({ uid, fromPhone, nfmReply }) {
+  try {
+    const responseJson = nfmReply?.response_json;
+
+    let payload = {};
+    try {
+      payload =
+        typeof responseJson === "string"
+          ? JSON.parse(responseJson)
+          : responseJson || {};
+    } catch (parseErr) {
+      console.error("❌ [WA FORM] Failed to parse response_json:", parseErr);
+      payload = {};
+    }
+
+    // Match the form. Meta echoes the flow_token we set when sending the form,
+    // which is formatted as `flow_<flowId>_<timestamp>`.
+    const flowToken = payload?.flow_token || "";
+    const forms = await query(`SELECT * FROM wa_forms WHERE uid = ?`, [uid]);
+
+    let matchedForm = null;
+    for (const f of forms) {
+      if (f.flow_id && flowToken.includes(String(f.flow_id))) {
+        matchedForm = f;
+        break;
+      }
+    }
+    // Fallback: most recently created form for this user
+    if (!matchedForm && forms.length > 0) {
+      matchedForm = forms[forms.length - 1];
+    }
+
+    await query(
+      `INSERT INTO wa_form_submissions (uid, flow_id, form_name, from_phone, raw_payload, createdAt) VALUES (?, ?, ?, ?, ?, NOW())`,
+      [
+        uid,
+        matchedForm?.flow_id || null,
+        matchedForm?.name || nfmReply?.name || "WhatsApp Form",
+        fromPhone,
+        JSON.stringify(payload),
+      ],
+    );
+
+    console.log(
+      `✅ [WA FORM] Submission saved for ${fromPhone} (form: ${
+        matchedForm?.name || "unknown"
+      })`,
+    );
+
+    // Build a readable summary for the inbox conversation
+    let summary = `📋 Form Submission${
+      matchedForm?.name ? `: ${matchedForm.name}` : ""
+    }\n`;
+    for (const [key, value] of Object.entries(payload)) {
+      if (key === "flow_token") continue;
+      const label = key
+        .split("_")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+      const displayValue = Array.isArray(value) ? value.join(", ") : value;
+      summary += `${label}: ${displayValue}\n`;
+    }
+
+    return summary.trim();
+  } catch (err) {
+    console.error("❌ [WA FORM] saveWaFormSubmission error:", err);
+    return null;
+  }
+}
+
 // Media Handling
 async function downloadAndSaveMedia(token, mediaId, uid) {
   try {
@@ -311,6 +383,17 @@ async function processMetaMsg({ body, uid }) {
           } else if (interactive?.list_reply) {
             msgContext = formatMessage("text", {
               body: interactive.list_reply.title,
+              preview_url: false,
+            });
+          } else if (interactive?.nfm_reply) {
+            // ✅ WhatsApp Flow (form) submission
+            const formText = await saveWaFormSubmission({
+              uid,
+              fromPhone: message.from,
+              nfmReply: interactive.nfm_reply,
+            });
+            msgContext = formatMessage("text", {
+              body: formText || "📋 Form submitted",
               preview_url: false,
             });
           }

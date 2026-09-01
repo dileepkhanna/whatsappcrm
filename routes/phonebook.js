@@ -280,4 +280,42 @@ router.post("/del_contacts", validateUser, async (req, res) => {
   }
 });
 
+// edit a single contact
+router.put("/edit_contact", validateUser, async (req, res) => {
+  try {
+    const { contactId, name, mobile, var1, var2, var3, var4, var5 } = req.body;
+
+    if (!contactId) {
+      return res.json({ success: false, msg: "Contact id is required" });
+    }
+    if (!mobile) {
+      return res.json({ success: false, msg: "Mobile number is required" });
+    }
+
+    const result = await query(
+      `UPDATE contact SET name = ?, mobile = ?, var1 = ?, var2 = ?, var3 = ?, var4 = ?, var5 = ? WHERE id = ? AND uid = ?`,
+      [
+        name || "",
+        mobile,
+        var1 || "",
+        var2 || "",
+        var3 || "",
+        var4 || "",
+        var5 || "",
+        contactId,
+        req.decode.uid,
+      ]
+    );
+
+    if (result.affectedRows < 1) {
+      return res.json({ success: false, msg: "Contact not found" });
+    }
+
+    res.json({ success: true, msg: "Contact was updated" });
+  } catch (err) {
+    res.json({ success: false, msg: "something went wrong" });
+    console.log(err);
+  }
+});
+
 module.exports = router;

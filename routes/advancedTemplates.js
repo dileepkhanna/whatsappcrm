@@ -134,7 +134,36 @@ router.post("/create_carousel_template", validateUser, async (req, res) => {
     );
     
     console.log('✅ Carousel template created:', response.data);
-    
+
+    // Persist each card's public image URL so we can attach it at SEND time.
+    // WhatsApp carousel messages require the image per card at send time
+    // (the template only stores an example handle, not a runtime image).
+    try {
+      const normalizedName = templateName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+      // Clear any previous rows for this template (in case of re-create)
+      await query(
+        `DELETE FROM meta_templet_media WHERE uid = ? AND templet_name LIKE ?`,
+        [req.decode.uid, `${normalizedName}__card_%`],
+      );
+      for (let i = 0; i < cards.length; i++) {
+        const card = cards[i] || {};
+        const imageUrl = card.imageUrl || '';
+        if (imageUrl && /^https?:\/\//i.test(imageUrl)) {
+          // Store only the filename (not the full URL) so the public URL can be
+          // rebuilt from the current request host at send time (ngrok/prod safe).
+          const fileMatch = imageUrl.match(/\/media\/([^/?#]+)$/);
+          const filename = fileMatch ? fileMatch[1] : imageUrl;
+          await query(
+            `INSERT INTO meta_templet_media (uid, templet_name, meta_hash, file_name, createdAt) VALUES (?, ?, ?, ?, NOW())`,
+            [req.decode.uid, `${normalizedName}__card_${i}`, null, filename],
+          );
+        }
+      }
+    } catch (persistErr) {
+      console.error('⚠️ Failed to persist carousel card images:', persistErr.message);
+      // Non-fatal: template is still created; sending may need manual image URLs.
+    }
+
     res.json({
       success: true,
       msg: "Carousel template created successfully! Wait for Meta approval (usually 15 min - 24 hours).",

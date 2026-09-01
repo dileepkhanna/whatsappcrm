@@ -1,0 +1,1 @@
+import{ot as e}from"./Box-BLXgjf5s.js";import{t}from"./createSvgIcon-BR_8trmA.js";var n=t((0,e().jsx)(`path`,{d:`M4 9h4v11H4zm12 4h4v7h-4zm-6-9h4v16h-4z`}),`BarChart`);export{n as t};

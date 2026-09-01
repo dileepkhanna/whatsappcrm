@@ -1777,7 +1777,18 @@ router.post("/return_media_url_meta", validateUser, async (req, res) => {
       });
     }
 
-    const url = `${process.env.FRONTENDURI}/media/${filename}`;
+    // Build the media URL from the domain the request actually came in on, so it
+    // auto-adapts when the domain changes (no hardcoded host). Honors reverse-proxy
+    // headers (x-forwarded-proto / x-forwarded-host). Falls back to FRONTENDURI,
+    // then to a relative path if neither is available.
+    const forwardedProto = (req.headers["x-forwarded-proto"] || "").toString().split(",")[0].trim();
+    const forwardedHost = (req.headers["x-forwarded-host"] || "").toString().split(",")[0].trim();
+    const proto = forwardedProto || req.protocol || "https";
+    const host = forwardedHost || req.get("host");
+    const origin = host
+      ? `${proto}://${host}`
+      : (process.env.FRONTENDURI || "").replace(/\/+$/, "");
+    const url = origin ? `${origin}/media/${filename}` : `/media/${filename}`;
 
     // Meta returns the full handle in the 'h' field
     // The entire 'h' value is the handle that Meta needs
@@ -1816,6 +1827,17 @@ router.post("/get_plan_details", validateUser, async (req, res) => {
     } else {
       res.json({ success: true, data: data[0] });
     }
+  } catch (err) {
+    res.json({ success: false, msg: "something went wrong", err });
+    console.log(err);
+  }
+});
+
+// get all available plans — public, no auth required
+router.get("/get_available_plans", async (req, res) => {
+  try {
+    const plans = await query(`SELECT * FROM plan ORDER BY price ASC`, []);
+    res.json({ success: true, data: plans });
   } catch (err) {
     res.json({ success: false, msg: "something went wrong", err });
     console.log(err);
@@ -3630,6 +3652,7 @@ router.post("/send_template_message", validateUser, async (req, res) => {
       header_variable = null,
       button_variables = [],
       campaign_id = null, // Optional campaign tracking
+      carousel_cards = null, // Optional: per-card image URLs [url0, url1, ...]
     } = req.body;
 
     console.log('📤 Sending template message:', {
@@ -3734,7 +3757,9 @@ router.post("/send_template_message", validateUser, async (req, res) => {
         formattedPhone,
         body_variables, // Global body variables (if any)
         cardCount, // Pass card count instead of empty cards array
-        templateStructure // Pass full template structure for reference
+        templateStructure, // Pass full template structure for reference
+        req.decode.uid, // For per-card image lookup (DB fallback)
+        Array.isArray(carousel_cards) ? carousel_cards : null // Explicit per-card image URLs (preferred)
       );
     } else if (templateType === "CATALOG") {
       const { sendCatalogTemplateMessage } = require("../loops/campaignBeta");
@@ -4166,7 +4191,7 @@ router.post(
             title: plan[0]?.title,
             unit_price: parseFloat(plan[0]?.price),
             quantity: 1,
-            currency_id: webPublic?.currency_code || "USD",
+            currency_id: webPublic?.currency_code || "INR",
           },
         ],
         back_urls: {

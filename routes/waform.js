@@ -8,6 +8,21 @@ const FormData = require("form-data");
 const API_VERSION = "v25.0";
 
 // ─── HELPER ───────────────────────────────────────────────────────────────────
+// Default country code applied when a number has no country code. India = 91.
+const DEFAULT_COUNTRY_CODE = "91";
+
+// Normalize a phone number to digits only and default bare 10-digit numbers to India.
+// e.g. "+91 99948318650" -> "9199948318650", "9948318650" -> "919948318650".
+// This MUST match the incoming inbox pipeline (extractPhoneNumber) so that outgoing
+// and incoming messages map to the SAME chat_id and we don't create duplicate chats.
+function normalizePhone(num) {
+  let digits = String(num || "").replace(/\D/g, "");
+  if (digits.length === 10) {
+    digits = DEFAULT_COUNTRY_CODE + digits;
+  }
+  return digits;
+}
+
 async function getMetaConfig(uid) {
   const [metaApi] = await query(`SELECT * FROM meta_api WHERE uid = ?`, [uid]);
   return metaApi;
@@ -454,8 +469,10 @@ router.post(
   checkWaForms,
   async (req, res) => {
     try {
-      const { id, to, customerName, templateName = "form_invitation" } = req.body;
-      
+      const { id, customerName, templateName = "form_invitation" } = req.body;
+      // Normalize recipient (default India 91 for bare 10-digit numbers)
+      const to = normalizePhone(req.body.to);
+
       const metaApi = await getMetaConfig(req.decode.uid);
       if (!metaApi) return res.json({ success: false, msg: "Meta API not configured" });
 
@@ -487,7 +504,7 @@ router.post(
                 name: "flow",
                 parameters: {
                   flow_message_version: "3",
-                  flow_token: "TOKEN_" + Date.now(),
+                  flow_token: `flow_${form.flow_id}_${Date.now()}`,
                   flow_id: form.flow_id,
                   flow_cta: "Open Form",
                   flow_action: "navigate",
@@ -503,7 +520,7 @@ router.post(
         
         // ✅ Create or update chat entry in beta_chats
         try {
-          const chatId = `meta_${to}_${req.decode.uid}`;
+          const chatId = `meta_${normalizePhone(to)}_${req.decode.uid}`;
           const existingChat = await query(
             `SELECT chat_id FROM beta_chats WHERE chat_id = ? LIMIT 1`,
             [chatId]
@@ -644,7 +661,7 @@ router.post(
                     name: "flow",
                     parameters: {
                       flow_message_version: "3",
-                      flow_token: "TOKEN_" + Date.now(),
+                      flow_token: `flow_${form.flow_id}_${Date.now()}`,
                       flow_id: form.flow_id,
                       flow_cta: "Open Form",
                       flow_action: "navigate",
@@ -660,7 +677,7 @@ router.post(
 
             // ✅ Create or update chat entry in beta_chats
             try {
-              const chatId = `meta_${to}_${req.decode.uid}`;
+              const chatId = `meta_${normalizePhone(to)}_${req.decode.uid}`;
               const existingChat = await query(
                 `SELECT chat_id FROM beta_chats WHERE chat_id = ? LIMIT 1`,
                 [chatId]
@@ -787,7 +804,9 @@ router.post(
   checkWaForms,
   async (req, res) => {
     try {
-      const { id, to } = req.body;
+      const { id } = req.body;
+      // Normalize recipient (default India 91 for bare 10-digit numbers)
+      const to = normalizePhone(req.body.to);
       const metaApi = await getMetaConfig(req.decode.uid);
       if (!metaApi)
         return res.json({ success: false, msg: "Meta API not configured" });
@@ -816,7 +835,7 @@ router.post(
               name: "flow",
               parameters: {
                 flow_message_version: "3",
-                flow_token: "TOKEN_" + Date.now(),
+                flow_token: `flow_${form.flow_id}_${Date.now()}`,
                 flow_id: form.flow_id,
                 flow_cta: "Open Form",
                 flow_action: "navigate",
@@ -835,7 +854,7 @@ router.post(
 
       // ✅ Create or update chat entry in beta_chats
       try {
-        const chatId = `meta_${to}_${req.decode.uid}`;
+        const chatId = `meta_${normalizePhone(to)}_${req.decode.uid}`;
         const existingChat = await query(
           `SELECT chat_id FROM beta_chats WHERE chat_id = ? LIMIT 1`,
           [chatId]
@@ -979,6 +998,11 @@ router.post(
         });
       }
       
+      // Normalize all recipient numbers (default India 91 for bare 10-digit numbers)
+      contacts = contacts
+        .map((c) => ({ ...c, mobile: normalizePhone(c.mobile) }))
+        .filter((c) => c.mobile.length >= 10);
+
       if (contacts.length === 0) {
         return res.json({ success: false, msg: "No contacts found" });
       }
@@ -1022,7 +1046,7 @@ router.post(
                   name: "flow",
                   parameters: {
                     flow_message_version: "3",
-                    flow_token: `TOKEN_${Date.now()}_${i}`,
+                    flow_token: `flow_${form.flow_id}_${Date.now()}_${i}`,
                     flow_id: form.flow_id,
                     flow_cta: "Open Form",
                     flow_action: "navigate",
@@ -1044,7 +1068,7 @@ router.post(
           
           // ✅ Create or update chat entry in beta_chats
           try {
-            const chatId = `meta_${contact.mobile}_${req.decode.uid}`;
+            const chatId = `meta_${normalizePhone(contact.mobile)}_${req.decode.uid}`;
             const existingChat = await query(
               `SELECT chat_id FROM beta_chats WHERE chat_id = ? LIMIT 1`,
               [chatId]

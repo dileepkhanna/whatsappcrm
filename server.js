@@ -88,20 +88,45 @@ app.use("/media", createMediaMiddleware("./client/public/media"));
 app.use("/meta-media", createMediaMiddleware("./client/public/meta-media"));
 
 // ─── Static & Catch-All ───────────────────────────────────────────────────────
-// Check if frontend build exists, otherwise fallback to old client
+// USE_LEGACY_CLIENT=true  → serve old CRA bundle from client/public
+// USE_LEGACY_CLIENT=false (default) → serve new Vite build from frontend/dist
 const frontendDistPath = path.resolve(currentDir, "./frontend/dist");
 const clientPublicPath = path.resolve(currentDir, "./client/public");
 
-const staticPath = fs.existsSync(frontendDistPath) ? frontendDistPath : clientPublicPath;
-const indexPath = fs.existsSync(frontendDistPath) 
+const useLegacy = process.env.USE_LEGACY_CLIENT === "true";
+const newFrontendReady = fs.existsSync(path.join(frontendDistPath, "index.html"));
+
+const staticPath  = (!useLegacy && newFrontendReady) ? frontendDistPath : clientPublicPath;
+const indexPath   = (!useLegacy && newFrontendReady)
   ? path.join(frontendDistPath, "index.html")
   : path.join(clientPublicPath, "index.html");
 
 console.log(`📂 Serving static files from: ${staticPath}`);
 
-app.use(express.static(staticPath));
+// Serve built assets. Hashed files under /assets are content-addressed, so they
+// can be cached long-term. index.html must NEVER be cached, otherwise the browser
+// can keep pointing at old chunk hashes that no longer exist after a rebuild
+// ("Failed to fetch dynamically imported module").
+app.use(
+  express.static(staticPath, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith("index.html")) {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+      } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      }
+    },
+  }),
+);
 
 app.get("*", function (request, response) {
+  // The SPA entry document must always be revalidated so clients pick up new
+  // asset hashes immediately after a deploy.
+  response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  response.setHeader("Pragma", "no-cache");
+  response.setHeader("Expires", "0");
   response.sendFile(indexPath);
 });
 

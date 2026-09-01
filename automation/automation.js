@@ -135,6 +135,48 @@ async function processFlow({
   });
 
   if (!flowSession?.data?.node && origin !== "webhook_automation") {
+    // Guard against infinite retry loop: if the flow has no reachable first
+    // node (e.g. the initial node id doesn't match, or there's no edge from it),
+    // deleting + recreating the session will always yield an empty node and we
+    // would loop until the 30s timeout. Detect that and stop.
+    const initialFlowNode =
+      nodes.find((n) => n.id === "initialNode") ||
+      nodes.find((n) => String(n.type || "").toLowerCase() === "initial");
+    const firstEdge = edges.find((e) => e.source === initialFlowNode?.id);
+    const firstRealNode = nodes.find((n) => n.id === firstEdge?.target);
+
+    if (!firstRealNode) {
+      console.error(
+        "Flow has no reachable first node from 'initialNode' - aborting to avoid retry loop",
+        {
+          flowId,
+          hasInitialNode: !!initialFlowNode,
+          hasFirstEdge: !!firstEdge,
+          nodeIds: nodes.map((n) => n.id),
+        },
+      );
+      // Make sure no stale session lingers.
+      await query(
+        `DELETE FROM flow_session WHERE uid = ? AND flow_id = ? AND sender_mobile = ? LIMIT 1`,
+        [uid, flowId, message.senderMobile],
+      );
+      return;
+    }
+
+    // Only allow a single retry to clear a genuinely stale session.
+    loopDetection.retryCount = (loopDetection.retryCount || 0) + 1;
+    if (loopDetection.retryCount > 1) {
+      console.error(
+        "Flow session still incomplete after retry - aborting to avoid loop",
+        { flowId, senderMobile: message.senderMobile },
+      );
+      await query(
+        `DELETE FROM flow_session WHERE uid = ? AND flow_id = ? AND sender_mobile = ? LIMIT 1`,
+        [uid, flowId, message.senderMobile],
+      );
+      return;
+    }
+
     console.log(
       "Flow looks incomplete trying to delete session and try again ",
     );

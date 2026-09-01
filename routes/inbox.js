@@ -88,28 +88,9 @@ router.get("/embed/webhook/:uid", async (req, res) => {
   try {
     const { uid } = req.params;
     
-    // Check if it's a user UID or admin UID
-    const [user] = await query(`SELECT uid FROM user WHERE uid = ?`, [uid]);
-    const [admin] = await query(`SELECT uid FROM admin WHERE uid = ?`, [uid]);
-    
-    let VERIFY_TOKEN = null;
-    
-    if (user) {
-      VERIFY_TOKEN = user.uid;
-    } else if (admin) {
-      VERIFY_TOKEN = admin.uid;
-    } else {
-      // Fallback to first admin UID for backward compatibility
-      const [firstAdmin] = await query(`SELECT uid FROM admin LIMIT 1`);
-      if (firstAdmin) {
-        VERIFY_TOKEN = firstAdmin.uid;
-      }
-    }
-    
-    if (!VERIFY_TOKEN) {
-      console.error('❌ No valid UID found for webhook verification');
-      return res.sendStatus(400);
-    }
+    // Use the UID from URL as the verify token
+    // This allows any UID to be used without database validation
+    const VERIFY_TOKEN = uid;
 
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
@@ -128,12 +109,17 @@ router.get("/embed/webhook/:uid", async (req, res) => {
       return res.sendStatus(400);
     }
 
+    // Verify that the token matches the UID from the URL
     if (mode === "subscribe" && token === VERIFY_TOKEN) {
       console.log("✅ WHATSAPP WEBHOOK VERIFIED");
+      console.log("   UID:", uid);
+      console.log("   Token matched successfully");
       return res.status(200).send(challenge);
     }
 
     console.error('❌ Webhook verification failed: token mismatch');
+    console.error('   Expected:', VERIFY_TOKEN);
+    console.error('   Received:', token);
     return res.sendStatus(403);
   } catch (err) {
     console.error('❌ Webhook verification error:', err);
@@ -269,6 +255,8 @@ router.post("/embed/webhook/:uid", async (req, res) => {
           origin: "meta",
         });
         logToFile("PROCESSING", "processMessage done");
+        // Note: WhatsApp Flow (form) submissions are saved inside processMessage
+        // (helper/inbox/meta -> saveWaFormSubmission), so no extra call is needed here.
 
         const messages = change.value?.messages || [];
         for (const message of messages) {
@@ -409,8 +397,8 @@ router.post("/webhook/:uid", async (req, res) => {
     switch (change.field) {
       case "messages":
         await handleMessages(change, userUID, body);
-
-        await handleWAFormSubmission(change, userUID);
+        // Note: WhatsApp Flow (form) submissions are saved inside processMessage
+        // (helper/inbox/meta -> saveWaFormSubmission), so no extra call is needed here.
 
         // Handle call permission replies for broadcasts
         const messages = change.value?.messages || [];

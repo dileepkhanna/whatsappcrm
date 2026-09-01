@@ -1,0 +1,1 @@
+import{ot as e}from"./Box-BLXgjf5s.js";import{t}from"./createSvgIcon-BR_8trmA.js";var n=t((0,e().jsx)(`path`,{d:`M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z`}),`KeyboardArrowDown`);export{n as t};

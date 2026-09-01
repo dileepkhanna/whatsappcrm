@@ -10,6 +10,18 @@ const { sign } = require("jsonwebtoken");
 const validateUser = require("../middlewares/user.js");
 const { checkPlan } = require("../middlewares/plan.js");
 
+// Build the public origin (scheme://host) from the incoming request, so media
+// URLs auto-adapt: ngrok URL when developing locally through ngrok, and the real
+// domain in production — no hardcoded host. Honors reverse-proxy headers.
+function buildOrigin(req) {
+  const fProto = (req.headers["x-forwarded-proto"] || "").toString().split(",")[0].trim();
+  const fHost = (req.headers["x-forwarded-host"] || "").toString().split(",")[0].trim();
+  const proto = fProto || req.protocol || "https";
+  const host = fHost || req.get("host");
+  if (host) return `${proto}://${host}`;
+  return (process.env.FRONTENDURI || "").replace(/\/+$/, "");
+}
+
 // adding campaign
 router.post("/add_new", validateUser, checkPlan, async (req, res) => {
   try {
@@ -1016,21 +1028,41 @@ router.get("/dashboard", validateUser, async (req, res) => {
       totalCampaigns += betaCampaigns[0]?.count || 0;
 
       // Get recent beta campaigns
+      // Counts are computed LIVE from beta_campaign_logs (delivery webhooks update
+      // those rows), and status is DERIVED from them, so the list matches the
+      // campaign details page and the activity chart. The stored *_count/status
+      // columns are only accurate at send time and don't reflect later delivery.
       betaCampaigns2 = await query(
         `SELECT 
           c.campaign_id,
           c.title,
           c.template_name,
-          c.status,
           c.createdAt,
           c.total_contacts,
-          c.sent_count,
-          c.delivered_count,
-          c.read_count,
-          c.failed_count,
+          COALESCE(l.sent_count, 0)      AS sent_count,
+          COALESCE(l.delivered_count, 0) AS delivered_count,
+          COALESCE(l.read_count, 0)      AS read_count,
+          COALESCE(l.failed_count, 0)    AS failed_count,
+          CASE
+            WHEN COALESCE(l.total, 0) = 0 THEN c.status
+            WHEN COALESCE(l.failed_count, 0) = COALESCE(l.total, 0) THEN 'FAILED'
+            WHEN COALESCE(l.failed_count, 0) > 0 THEN 'PARTIAL'
+            ELSE 'COMPLETED'
+          END AS status,
           p.name as phonebook_name
         FROM beta_campaign c
         LEFT JOIN phonebook p ON c.phonebook_id = p.id
+        LEFT JOIN (
+          SELECT
+            campaign_id,
+            COUNT(*) AS total,
+            SUM(CASE WHEN status = 'SENT' AND LOWER(COALESCE(delivery_status,'')) <> 'failed' THEN 1 ELSE 0 END) AS sent_count,
+            SUM(CASE WHEN LOWER(delivery_status) = 'delivered' THEN 1 ELSE 0 END) AS delivered_count,
+            SUM(CASE WHEN LOWER(delivery_status) = 'read' THEN 1 ELSE 0 END) AS read_count,
+            SUM(CASE WHEN status = 'FAILED' OR LOWER(delivery_status) = 'failed' THEN 1 ELSE 0 END) AS failed_count
+          FROM beta_campaign_logs
+          GROUP BY campaign_id
+        ) l ON l.campaign_id = c.campaign_id
         WHERE c.uid = ?
         ORDER BY c.createdAt DESC
         LIMIT 10`,
@@ -1085,12 +1117,15 @@ router.get("/dashboard", validateUser, async (req, res) => {
     // Try beta_campaign_logs
     try {
       const betaMessageStats = await query(
+        // A message is FAILED if either the send failed (status='FAILED') or Meta
+        // reported a delivery failure (delivery_status='failed'). This matches the
+        // activity chart and the campaign details page so all views agree.
         `SELECT 
           COUNT(*) as total,
-          SUM(CASE WHEN status = 'SENT' THEN 1 ELSE 0 END) as sent,
-          SUM(CASE WHEN delivery_status = 'delivered' THEN 1 ELSE 0 END) as delivered,
-          SUM(CASE WHEN delivery_status = 'read' THEN 1 ELSE 0 END) as \`read\`,
-          SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed,
+          SUM(CASE WHEN status = 'SENT' AND LOWER(COALESCE(delivery_status,'')) <> 'failed' THEN 1 ELSE 0 END) as sent,
+          SUM(CASE WHEN LOWER(delivery_status) = 'delivered' THEN 1 ELSE 0 END) as delivered,
+          SUM(CASE WHEN LOWER(delivery_status) = 'read' THEN 1 ELSE 0 END) as \`read\`,
+          SUM(CASE WHEN status = 'FAILED' OR LOWER(delivery_status) = 'failed' THEN 1 ELSE 0 END) as failed,
           SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) as pending
         FROM beta_campaign_logs
         WHERE uid = ?`,
@@ -1137,11 +1172,27 @@ router.get("/dashboard", validateUser, async (req, res) => {
     const statusMap = new Map();
     
     try {
+      // Derive status from live logs so the donut matches the list/details.
       const betaCampaignsByStatus = await query(
-        `SELECT status, COUNT(*) as count
-        FROM beta_campaign
-        WHERE uid = ?
-        GROUP BY status`,
+        `SELECT derived_status AS status, COUNT(*) AS count FROM (
+           SELECT c.campaign_id,
+             CASE
+               WHEN COALESCE(l.total, 0) = 0 THEN c.status
+               WHEN COALESCE(l.failed_count, 0) = COALESCE(l.total, 0) THEN 'FAILED'
+               WHEN COALESCE(l.failed_count, 0) > 0 THEN 'PARTIAL'
+               ELSE 'COMPLETED'
+             END AS derived_status
+           FROM beta_campaign c
+           LEFT JOIN (
+             SELECT campaign_id,
+               COUNT(*) AS total,
+               SUM(CASE WHEN status = 'FAILED' OR LOWER(delivery_status) = 'failed' THEN 1 ELSE 0 END) AS failed_count
+             FROM beta_campaign_logs
+             GROUP BY campaign_id
+           ) l ON l.campaign_id = c.campaign_id
+           WHERE c.uid = ?
+         ) t
+         GROUP BY derived_status`,
         [uid],
       );
       betaCampaignsByStatus.forEach(item => {
@@ -1168,6 +1219,59 @@ router.get("/dashboard", validateUser, async (req, res) => {
 
     campaignsByStatus = Array.from(statusMap.entries()).map(([status, count]) => ({ status, count }));
 
+    // Daily activity for the last 7 days (from beta_campaign_logs)
+    let dailyStats = [];
+    try {
+      // Group by the IST calendar day. createdAt is stored in UTC (NOW()), so we
+      // convert to IST (+05:30) before taking the date, and also build the JS
+      // 7-day series in IST — otherwise "today" lands on the wrong weekday bar.
+      const IST_OFFSET_MIN = 330; // +05:30
+      const rows = await query(
+        `SELECT 
+           DATE(CONVERT_TZ(createdAt, '+00:00', '+05:30')) AS day,
+           COUNT(*) AS total,
+           SUM(CASE WHEN LOWER(COALESCE(delivery_status, status)) = 'delivered' THEN 1 ELSE 0 END) AS delivered,
+           SUM(CASE WHEN LOWER(COALESCE(delivery_status, status)) = 'read' THEN 1 ELSE 0 END) AS \`read\`,
+           SUM(CASE WHEN LOWER(COALESCE(delivery_status, status)) = 'failed' THEN 1 ELSE 0 END) AS failed
+         FROM beta_campaign_logs
+         WHERE uid = ?
+           AND CONVERT_TZ(createdAt, '+00:00', '+05:30') >= (UTC_TIMESTAMP() + INTERVAL 330 MINUTE - INTERVAL 6 DAY)
+         GROUP BY day
+         ORDER BY day ASC`,
+        [uid],
+      );
+
+      // IST "today" as YYYY-MM-DD, computed from UTC + offset.
+      const istDayKey = (date) => {
+        const ist = new Date(date.getTime() + IST_OFFSET_MIN * 60000);
+        return ist.toISOString().slice(0, 10);
+      };
+
+      const byDay = new Map(
+        rows.map((r) => [
+          // r.day comes back as a date-only string/Date already in IST calendar day
+          typeof r.day === "string" ? r.day.slice(0, 10) : new Date(r.day).toISOString().slice(0, 10),
+          {
+            total: parseInt(r.total || 0),
+            delivered: parseInt(r.delivered || 0),
+            read: parseInt(r.read || 0),
+            failed: parseInt(r.failed || 0),
+          },
+        ]),
+      );
+
+      const nowUtc = new Date();
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(nowUtc.getTime() - i * 24 * 60 * 60000);
+        const key = istDayKey(d);
+        const stat = byDay.get(key) || { total: 0, delivered: 0, read: 0, failed: 0 };
+        dailyStats.push({ date: key, ...stat });
+      }
+    } catch (error) {
+      console.log('Daily stats query failed:', error.message);
+      dailyStats = [];
+    }
+
     // Combine recent campaigns
     const allCampaigns = [...betaCampaigns2, ...oldBroadcasts]
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -1185,7 +1289,7 @@ router.get("/dashboard", validateUser, async (req, res) => {
       totalCampaigns,
       messageStats: finalMessageStats,
       campaignsByStatus,
-      dailyStats: [],
+      dailyStats,
       recentCampaigns: allCampaigns,
     });
   } catch (error) {
@@ -1654,6 +1758,76 @@ router.get("/get-meta-template-details/:templateId", validateUser, async (req, r
       success: false, 
       msg: "Failed to fetch template details"
     });
+  }
+});
+
+// ✅ Get saved per-card image URLs for a carousel template (used on the Send screen
+// to pre-fill and let the user confirm/edit each card image before sending).
+router.get("/carousel_card_media/:templateName", validateUser, async (req, res) => {
+  try {
+    const { templateName } = req.params;
+    const normalizedName = String(templateName).toLowerCase().replace(/[^a-z0-9_]/g, "_");
+    const origin = buildOrigin(req);
+
+    const rows = await query(
+      `SELECT templet_name, file_name FROM meta_templet_media WHERE uid = ? AND templet_name LIKE ?`,
+      [req.decode.uid, `${normalizedName}__card_%`],
+    );
+
+    // Build an ordered array indexed by card position. The stored value may be a
+    // full (possibly stale) URL or a bare filename — always rebuild the URL from
+    // the CURRENT request origin so it matches the live domain (ngrok/prod).
+    const cards = [];
+    for (const row of rows) {
+      const m = String(row.templet_name).match(/__card_(\d+)$/);
+      if (!m) continue;
+      const stored = String(row.file_name || "");
+      const fileMatch = stored.match(/\/media\/([^/?#]+)$/) || stored.match(/^([^/?#]+)$/);
+      const filename = fileMatch ? fileMatch[1] : stored;
+      cards[parseInt(m[1], 10)] = origin ? `${origin}/media/${filename}` : `/media/${filename}`;
+    }
+
+    // Backfill for OLD templates that have no saved rows: the client can pass the
+    // template's own image URLs (e.g. Meta scontent URLs) via ?fallback=<json array>.
+    // We download each into /media, save the mapping, and return our-domain URLs
+    // so the field shows a clean https://<domain>/media/<file>.jpg (like standard).
+    let fallback = [];
+    try {
+      if (req.query.fallback) fallback = JSON.parse(req.query.fallback);
+    } catch { fallback = []; }
+
+    if (Array.isArray(fallback) && fallback.length > 0) {
+      const fs = require("fs");
+      const path = require("path");
+      const axios = require("axios");
+      const mime = require("mime-types");
+      const mediaDir = path.resolve(__dirname, "../client/public/media");
+      if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
+
+      for (let i = 0; i < fallback.length; i++) {
+        if (cards[i]) continue; // already have a saved URL for this card
+        const srcUrl = fallback[i];
+        if (!srcUrl || !/^https?:\/\//i.test(srcUrl)) continue;
+        try {
+          const dl = await axios.get(srcUrl, { responseType: "arraybuffer", timeout: 30000 });
+          const ext = mime.extension(dl.headers["content-type"]) || "jpg";
+          const fname = `${randomstring.generate()}.${ext}`;
+          fs.writeFileSync(path.join(mediaDir, fname), Buffer.from(dl.data));
+          await query(
+            `INSERT INTO meta_templet_media (uid, templet_name, meta_hash, file_name, createdAt) VALUES (?, ?, ?, ?, NOW())`,
+            [req.decode.uid, `${normalizedName}__card_${i}`, null, fname],
+          );
+          cards[i] = origin ? `${origin}/media/${fname}` : `/media/${fname}`;
+        } catch (dlErr) {
+          console.error(`⚠️ [CARD BACKFILL] card ${i} failed:`, dlErr.message);
+        }
+      }
+    }
+
+    res.json({ success: true, cards });
+  } catch (err) {
+    console.error("Error fetching carousel card media:", err);
+    res.json({ success: false, cards: [], msg: "Failed to fetch carousel card media" });
   }
 });
 

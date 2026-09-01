@@ -53,7 +53,8 @@ function initializeSocket(server) {
   // Authentication middleware
   ioInstance.use(async (socket, next) => {
     try {
-      const { token } = socket.handshake.query; // Changed from query to auth for better security
+      // Accept token from both auth object (preferred) and query params (fallback)
+      const token = socket.handshake.auth?.token || socket.handshake.query?.token;
 
       if (!token) {
         return next(new Error("Authentication token required"));

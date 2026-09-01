@@ -1,9 +1,127 @@
 const { query } = require("../database/dbpromise");
 const { sendTemplateMessage } = require("../functions/function");
 const moment = require("moment-timezone");
+const fs = require("fs");
+const path = require("path");
+const FormData = require("form-data");
+const mime = require("mime-types");
+const sharp = require("sharp");
+
+// Re-encode an image buffer to a WhatsApp-safe format: 8-bit RGB JPEG, flattened
+// (no alpha), no exotic color profiles. Meta rejects 16-bit / CMYK / some PNGs
+// with error 131053 "Image is invalid". Returns { buffer, contentType } or null.
+async function normalizeImageForWhatsApp(inputBuffer) {
+  try {
+    const out = await sharp(inputBuffer)
+      .flatten({ background: { r: 255, g: 255, b: 255 } }) // drop alpha -> white bg
+      .toColourspace("srgb")
+      .jpeg({ quality: 90, chromaSubsampling: "4:2:0" })
+      .toBuffer();
+    return { buffer: out, contentType: "image/jpeg", ext: "jpg" };
+  } catch (e) {
+    console.error("⚠️ [IMAGE NORMALIZE] Failed:", e.message);
+    return null;
+  }
+}
 
 // Simple processing flags
 const processingCampaigns = new Set();
+
+// Cache of local filename -> Meta media id (reusable across recipients in a run)
+const mediaIdCache = new Map();
+
+// Upload a locally-stored media file to Meta's /{phone_number_id}/media endpoint
+// and return a reusable media id. This avoids relying on a public image URL
+// (which can fail when Meta can't fetch it, e.g. ngrok 403).
+async function uploadMediaToMeta(apiVersion, phoneNumberId, accessToken, filename) {
+  if (!filename) return null;
+  if (mediaIdCache.has(filename)) return mediaIdCache.get(filename);
+
+  const filePath = path.resolve(__dirname, "../client/public/media", filename);
+  if (!fs.existsSync(filePath)) {
+    console.error(`⚠️ [MEDIA UPLOAD] File not found for upload: ${filePath}`);
+    return null;
+  }
+
+  try {
+    // Normalize to a WhatsApp-safe 8-bit RGB JPEG to avoid 131053 "Image is invalid".
+    const raw = fs.readFileSync(filePath);
+    const normalized = await normalizeImageForWhatsApp(raw);
+    const uploadBuffer = normalized ? normalized.buffer : raw;
+    const uploadType = normalized ? normalized.contentType : (mime.lookup(filePath) || "image/jpeg");
+    const uploadName = normalized ? `card.${normalized.ext}` : path.basename(filePath);
+
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", uploadType);
+    form.append("file", uploadBuffer, { filename: uploadName, contentType: uploadType });
+
+    const axios = require("axios");
+    const resp = await axios.post(
+      `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/media`,
+      form,
+      { headers: { Authorization: `Bearer ${accessToken}`, ...form.getHeaders() } },
+    );
+
+    const mediaId = resp.data?.id || null;
+    if (mediaId) mediaIdCache.set(filename, mediaId);
+    return mediaId;
+  } catch (err) {
+    console.error(`⚠️ [MEDIA UPLOAD] Failed for ${filename}:`, err.response?.data?.error?.message || err.message);
+    return null;
+  }
+}
+
+// Download an image from any URL (e.g. Meta's scontent CDN, which the SERVER can
+// fetch even though Meta's message-send fetcher rejects it) and re-upload it to
+// Meta's media endpoint to get a reusable media id. Works for old templates that
+// have no locally-saved card files. Cached by URL.
+async function uploadMediaFromUrlToMeta(apiVersion, phoneNumberId, accessToken, imageUrl) {
+  if (!imageUrl) return null;
+  if (mediaIdCache.has(imageUrl)) return mediaIdCache.get(imageUrl);
+
+  try {
+    const axios = require("axios");
+    // 1) Download the image bytes server-side.
+    const dl = await axios.get(imageUrl, { responseType: "arraybuffer", timeout: 30000 });
+
+    // 2) Normalize to a WhatsApp-safe JPEG (avoids 131053 "Image is invalid").
+    const normalized = await normalizeImageForWhatsApp(Buffer.from(dl.data));
+    const uploadBuffer = normalized ? normalized.buffer : Buffer.from(dl.data);
+    const contentType = normalized ? normalized.contentType : (dl.headers["content-type"] || "image/jpeg");
+    const ext = normalized ? normalized.ext : (mime.extension(contentType) || "jpg");
+
+    // 3) Upload to Meta as media -> reusable id.
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", contentType);
+    form.append("file", uploadBuffer, {
+      filename: `card.${ext}`,
+      contentType,
+    });
+
+    const resp = await axios.post(
+      `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/media`,
+      form,
+      { headers: { Authorization: `Bearer ${accessToken}`, ...form.getHeaders() } },
+    );
+
+    const mediaId = resp.data?.id || null;
+    if (mediaId) mediaIdCache.set(imageUrl, mediaId);
+    return mediaId;
+  } catch (err) {
+    console.error(`⚠️ [MEDIA URL UPLOAD] Failed for ${imageUrl}:`, err.response?.data?.error?.message || err.message);
+    return null;
+  }
+}
+
+// Extract the "<file>" portion from a stored value that may be a filename or a
+// full URL like https://host/media/<file>.
+function filenameFromStored(stored) {
+  const s = String(stored || "");
+  const m = s.match(/\/media\/([^/?#]+)$/) || s.match(/^([^/?#]+)$/);
+  return m ? m[1] : "";
+}
 
 // Configuration
 const CONFIG = {
@@ -123,13 +241,15 @@ async function sendCarouselTemplateMessage(
   globalBodyVariables = [],
   cardCount = 2,
   templateStructure = null,
+  uid = null,
+  cardImageUrlsOverride = null,
 ) {
   const url = `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`;
 
-  // 🎨 CAROUSEL TEMPLATES: Per Meta's documentation
-  // We need to send carousel component with card_index for each card
-  // Images are baked into template, so NO header parameters needed
-  
+  // 🎨 CAROUSEL TEMPLATES: WhatsApp requires the image to be supplied per card
+  // at SEND time (the template only stores an example handle). We use explicit
+  // URLs passed from the caller if available, otherwise the URLs saved when the
+  // template was created.
   const components = [];
   
   // Add global body component if there are variables
@@ -143,27 +263,89 @@ async function sendCarouselTemplateMessage(
     });
   }
 
-  // Build carousel component
-  // For carousel templates: each card has HEADER (image) and BODY components
-  // Images are baked into template, so we send empty parameters for header
+  // Per-card LINK override passed from the caller (e.g. the Send screen). These
+  // may be Meta scontent URLs or your own /media URLs — used as a link fallback.
+  const cardLinkOverride = {};
+  if (Array.isArray(cardImageUrlsOverride)) {
+    cardImageUrlsOverride.forEach((u, i) => {
+      if (u) cardLinkOverride[i] = u;
+    });
+  }
+
+  // Per-card LOCAL filenames saved at template creation. These map to real files
+  // in client/public/media and are the reliable source for a media-id upload
+  // (no public URL needed → immune to ngrok/403).
+  const cardLocalFilename = {};
+  if (uid) {
+    try {
+      const normalizedName = String(templateName).toLowerCase().replace(/[^a-z0-9_]/g, '_');
+      const rows = await query(
+        `SELECT templet_name, file_name FROM meta_templet_media WHERE uid = ? AND templet_name LIKE ?`,
+        [uid, `${normalizedName}__card_%`],
+      );
+      for (const row of rows) {
+        const m = String(row.templet_name).match(/__card_(\d+)$/);
+        if (m) cardLocalFilename[parseInt(m[1], 10)] = filenameFromStored(row.file_name);
+      }
+    } catch (lookupErr) {
+      console.error("⚠️ Failed to load carousel card images:", lookupErr.message);
+    }
+  }
+
+  // Fallback: try to read example header handles from the template structure
+  const carouselComponentDef = templateStructure?.components?.find((c) => c.type === "CAROUSEL");
+
   const carouselCards = [];
-  
   for (let i = 0; i < cardCount; i++) {
     const cardComponents = [];
-    
-    // Add header component with NO parameters (image is baked into template)
-    // Meta requires header component to be present but with empty parameters array
+    const headerParameters = [];
+
+    // 1) Preferred: upload the locally-stored file → Meta media id (image.id).
+    //    Also handle the case where the override itself is a /media/<file> URL.
+    let filename = cardLocalFilename[i] || "";
+    if (!filename && cardLinkOverride[i] && /\/media\//.test(cardLinkOverride[i])) {
+      filename = filenameFromStored(cardLinkOverride[i]);
+    }
+    let mediaId = null;
+    if (filename) {
+      mediaId = await uploadMediaToMeta(apiVersion, phoneNumberId, accessToken, filename);
+    }
+
+    // 2) If no local file, download the link (works for Meta scontent URLs and
+    //    any server-reachable URL) and re-upload to get a media id. This fixes
+    //    old templates and the ngrok 403 case.
+    if (!mediaId && cardLinkOverride[i] && /^https?:\/\//i.test(cardLinkOverride[i])) {
+      mediaId = await uploadMediaFromUrlToMeta(apiVersion, phoneNumberId, accessToken, cardLinkOverride[i]);
+    }
+
+    console.log(`🧩 [CAROUSEL CARD ${i}] localFile=${filename || 'none'} | link=${cardLinkOverride[i] || 'none'} | mediaId=${mediaId || 'none'}`);
+
+    if (mediaId) {
+      headerParameters.push({ type: "image", image: { id: mediaId } });
+    } else if (cardLinkOverride[i] && /^https?:\/\//i.test(cardLinkOverride[i])) {
+      // 3) Last-resort link (only if the upload failed).
+      console.log(`⚠️ [CAROUSEL CARD ${i}] Falling back to image.link (upload failed) — this may 403 in Meta.`);
+      headerParameters.push({ type: "image", image: { link: cardLinkOverride[i] } });
+    } else {
+      // 4) Last resort: the template's example header handle.
+      const exHandle = carouselComponentDef?.cards?.[i]?.components
+        ?.find((c) => c.type === "HEADER")?.example?.header_handle?.[0];
+      if (exHandle) {
+        headerParameters.push({ type: "image", image: { id: exHandle } });
+      }
+    }
+
     cardComponents.push({
       type: "header",
-      parameters: [], // Empty - image is from template definition
+      parameters: headerParameters,
     });
-    
-    // Add body component with NO parameters (text is baked into template)
+
+    // Body has no runtime variables here (text is baked into template)
     cardComponents.push({
       type: "body",
-      parameters: [], // Empty - body text is from template definition
+      parameters: [],
     });
-    
+
     carouselCards.push({
       card_index: i,
       components: cardComponents,
@@ -334,6 +516,7 @@ async function processSingleCampaign(campaign) {
   // 🔍 Auto-detect template type if header_variable is null
   // This handles campaigns created without specifying template type
   let templateType = "STANDARD";
+  let carouselTemplateStructure = null; // full template def, for card images/count
   
   if (headerVariable?.type === "CAROUSEL") {
     templateType = "CAROUSEL";
@@ -355,6 +538,7 @@ async function processSingleCampaign(campaign) {
         );
         
         if (matchingTemplate && matchingTemplate.components) {
+          carouselTemplateStructure = matchingTemplate;
           // Check if template has CAROUSEL component
           const hasCarousel = matchingTemplate.components.some(
             c => c.type === "CAROUSEL"
@@ -401,6 +585,9 @@ async function processSingleCampaign(campaign) {
           ),
         }));
 
+        const loopCarouselDef = carouselTemplateStructure?.components?.find((c) => c.type === "CAROUSEL");
+        const loopCardCount = loopCarouselDef?.cards?.length || cards.length || 2;
+
         result = await sendCarouselTemplateMessage(
           "v18.0",
           credentials.business_phone_number_id,
@@ -409,7 +596,9 @@ async function processSingleCampaign(campaign) {
           campaign.template_language,
           log.contact_mobile,
           replaceContactVariables(bodyVariables, contact),
-          cards,
+          loopCardCount,
+          carouselTemplateStructure,
+          campaign.uid,
         );
       } else if (templateType === "CATALOG") {
         const processedBodyVars = replaceContactVariables(

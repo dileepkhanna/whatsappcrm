@@ -68,6 +68,10 @@ CREATE TABLE IF NOT EXISTS `plan` (
   `instagram_inbox` tinyint(1) DEFAULT 0,
   `telegram_inbox` tinyint(1) DEFAULT 0,
   `allow_wa_forms` tinyint(1) DEFAULT 0,
+  `allow_wa_call` tinyint(1) DEFAULT 0,
+  `allow_webhook` tinyint(1) DEFAULT 0,
+  `allow_chat_widget` tinyint(1) DEFAULT 0,
+  `allow_agents` tinyint(1) DEFAULT 0,
   `createdAt` datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -210,6 +214,7 @@ CREATE TABLE IF NOT EXISTS `agent_task` (
   `title` varchar(255) DEFAULT NULL,
   `description` text DEFAULT NULL,
   `status` varchar(50) DEFAULT 'pending',
+  `agent_comments` text DEFAULT NULL,
   `createdAt` datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

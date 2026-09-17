@@ -16,6 +16,7 @@ const {
   callOpenAI,
   callGemini,
   callDeepSeek,
+  callOpenRouter,
 } = require("../functions/function.js");
 const { sign } = require("jsonwebtoken");
 const validateUser = require("../middlewares/user.js");
@@ -23,6 +24,60 @@ const { checkPlan } = require("../middlewares/plan.js");
 const validateAgent = require("../middlewares/agent.js");
 const { returnAddons } = require("../utils/addons.js");
 const axios = require("axios");
+
+/**
+ * Attempts to repair a truncated AI JSON response of shape { nodes:[...], edges:[...] }.
+ * When the model runs out of tokens mid-array, we trim back to the last complete
+ * array element and re-close the structure so the flow is still usable.
+ */
+function tryRepairTruncatedJson(str) {
+  try {
+    // Extract the nodes array up to its last complete "}" element
+    const grab = (key) => {
+      const startIdx = str.indexOf(`"${key}"`);
+      if (startIdx === -1) return [];
+      const arrStart = str.indexOf("[", startIdx);
+      if (arrStart === -1) return [];
+
+      // Walk char-by-char tracking brace depth, collecting complete objects
+      let depth = 0;
+      let objStart = -1;
+      let inString = false;
+      let escape = false;
+      const objects = [];
+
+      for (let i = arrStart + 1; i < str.length; i++) {
+        const ch = str[i];
+        if (escape) { escape = false; continue; }
+        if (ch === "\\") { escape = true; continue; }
+        if (ch === '"') { inString = !inString; continue; }
+        if (inString) continue;
+
+        if (ch === "{") { if (depth === 0) objStart = i; depth++; }
+        else if (ch === "}") {
+          depth--;
+          if (depth === 0 && objStart !== -1) {
+            const objStr = str.slice(objStart, i + 1);
+            try { objects.push(JSON.parse(objStr)); } catch { /* skip broken */ }
+            objStart = -1;
+          }
+        } else if (ch === "]" && depth === 0) {
+          break; // array closed
+        }
+      }
+      return objects;
+    };
+
+    const nodes = grab("nodes");
+    const edges = grab("edges");
+    if (nodes.length > 0) {
+      return { nodes, edges };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 router.post("/add_new", validateUser, checkPlan, async (req, res) => {
   try {
@@ -731,25 +786,63 @@ router.post("/generate", validateUser, async (req, res) => {
           userPrompt,
         );
         break;
+      case "openrouter":
+        rawJson = await callOpenRouter(apiKey, model.id, systemPrompt, userPrompt);
+        break;
       default:
         return res.json({ success: false, msg: "Unsupported provider" });
+    }
+
+    // Guard: some models return null content (e.g. openrouter/free auto-router
+    // when all free models are rate-limited, or thinking-mode models that emit
+    // reasoning tokens only).
+    if (!rawJson || typeof rawJson !== "string") {
+      console.error("[AI Flow Builder] null/empty response from model:", model.id);
+      return res.json({
+        success: false,
+        msg: rawJson === null
+          ? "The model returned no content. This often means the free-tier model is rate-limited or temporarily unavailable. Try a different model (e.g. 'NVIDIA Nemotron Super 120B') or wait a minute and retry."
+          : "AI returned an unexpected empty response. Please try again.",
+        raw: rawJson,
+      });
     }
 
     // Parse and validate
     let parsed;
     try {
       // Strip markdown fences if model ignores json_object instruction
-      const cleaned = rawJson
+      let cleaned = rawJson
         .replace(/^```json\s*/i, "")
         .replace(/^```\s*/i, "")
         .replace(/```\s*$/i, "")
         .trim();
-      parsed = JSON.parse(cleaned);
+
+      // Extract the outermost JSON object (handles models that add prose
+      // before/after the JSON like "Here is your flow: {...}")
+      const firstBrace = cleaned.indexOf("{");
+      const lastBrace = cleaned.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+      }
+
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch (innerErr) {
+        // Attempt a light repair: the response was likely truncated mid-object.
+        // Try progressively trimming to the last complete node/edge.
+        const repaired = tryRepairTruncatedJson(cleaned);
+        if (repaired) {
+          parsed = repaired;
+          console.warn("⚠️ AI JSON was truncated — auto-repaired to last complete element");
+        } else {
+          throw innerErr;
+        }
+      }
     } catch (e) {
       console.error("JSON parse error:", e.message, "\nRaw:", rawJson);
       return res.json({
         success: false,
-        msg: "AI returned invalid JSON. Try rephrasing your instruction.",
+        msg: "AI returned incomplete JSON — the flow may be too long for this model. Try a shorter description, split it into two prompts, or use a larger model (e.g. GPT-4o).",
         raw: rawJson,
       });
     }

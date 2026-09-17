@@ -77,7 +77,8 @@
     "telegram": "^2.26.22",
     "unzipper": "^0.10.14",
     "url": "^0.11.4",
-    "vm2": "^3.10.2"
+    "vm2": "^3.10.2",
+    "web-push": "^3.6.7"
   },
   "overrides": {
     "@tootallnate/once": "^3.0.1"

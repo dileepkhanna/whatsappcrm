@@ -209,11 +209,29 @@ function extractPhoneNumber(str) {
 }
 
 function extractFinalNumber(chatInfo) {
+  // 1) Preferred: parse the sending device's number from origin_instance_id.id
+  //    which is normally a JID like "919948318650:1@s.whatsapp.net".
   try {
     const otherData = JSON.parse(chatInfo?.origin_instance_id);
-    const number = extractPhoneNumber(otherData?.id);
-    return number;
+    const jidNumber = extractPhoneNumber(otherData?.id);
+    if (jidNumber) return jidNumber;
+
+    // Fallback: id stored as a bare number (older new-conversation rows).
+    if (otherData?.id) {
+      const bare = String(otherData.id).replace(/\D/g, "");
+      if (bare) return bare;
+    }
   } catch (error) {
+    // fall through to chat_id based extraction
+  }
+
+  // 2) Last resort: derive the device number from the chat_id, whose QR format
+  //    is "<instanceNumber>_<recipientPhone>_<uid>".
+  try {
+    const first = String(chatInfo?.chat_id || "").split("_")[0];
+    const bare = first.replace(/\D/g, "");
+    return bare || null;
+  } catch {
     return null;
   }
 }
@@ -603,7 +621,38 @@ async function sendQrMsg({ uid, to, msgObj, chatInfo }) {
       return { success: false, msg: "Session not found locally" };
     }
 
-    const jid = chatInfo?.isGroup ? formatGroup(to) : formatPhone(to);
+    let jid = chatInfo?.isGroup ? formatGroup(to) : formatPhone(to);
+
+    // For 1:1 chats, verify the number is actually on WhatsApp and use the
+    // exact JID WhatsApp returns. Sending to a malformed/unregistered number on
+    // a freshly linked device can get the session unlinked (401). We only guard
+    // direct chats (not groups). Failures here are non-fatal — if the check
+    // itself errors we fall back to the formatted JID.
+    if (!chatInfo?.isGroup) {
+      try {
+        const digits = String(to).replace(/\D/g, "");
+        if (digits.length < 8) {
+          return {
+            success: false,
+            msg: "Invalid phone number. Include the country code (e.g. 91XXXXXXXXXX).",
+          };
+        }
+        const results = await timeoutPromise(
+          session.onWhatsApp(digits),
+          20000,
+        );
+        const match = Array.isArray(results) ? results[0] : null;
+        if (!match || !match.exists) {
+          return {
+            success: false,
+            msg: "This number is not on WhatsApp. Check the number and country code.",
+          };
+        }
+        if (match.jid) jid = match.jid;
+      } catch (checkErr) {
+        console.log("onWhatsApp check failed (continuing):", checkErr?.message);
+      }
+    }
 
     // console.log({ qrObj, jid });
 

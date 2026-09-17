@@ -15,7 +15,23 @@ const {
   makeInMemoryStore,
   Browsers,
   delay,
+  fetchLatestBaileysVersion,
 } = require("baileys");
+
+// Cache the WA Web version so we don't refetch on every session.
+let cachedWaVersion = null;
+async function getWaVersion() {
+  if (cachedWaVersion) return cachedWaVersion;
+  try {
+    const { version } = await fetchLatestBaileysVersion();
+    cachedWaVersion = version;
+    console.log("✅ Baileys WA version:", version);
+  } catch (e) {
+    console.error("⚠️ fetchLatestBaileysVersion failed, using default:", e.message);
+    cachedWaVersion = undefined; // let Baileys use its bundled default
+  }
+  return cachedWaVersion;
+}
 
 // Import socket functions
 const { getConnectionsByUid, sendToSocket } = require("../../../socket");
@@ -43,7 +59,7 @@ const logger = pino({ level: "silent" });
  */
 function setSocketIO(socketIO) {
   io = socketIO;
-  console.log("✅ Socket.IO attached to QR module");
+  console.log("✅ Socket.IO attached to QR module [QR-ENGINE v2: version-fetch + buffer]");
 }
 
 /**
@@ -70,27 +86,40 @@ function getSession(sessionId) {
 /**
  * Create WhatsApp session with QR code
  */
-async function createSession(sessionId) {
+async function createSession(sessionId, isReconnect = false) {
   try {
-    console.log(`🚀 Creating session: ${sessionId}`);
+    console.log(`🚀 Creating session: ${sessionId} (reconnect: ${isReconnect})`);
 
-    // Clean up existing session if any
-    if (sessions.has(sessionId)) {
-      console.log(`⚠️ Session ${sessionId} already exists, cleaning up...`);
-      await deleteSession(sessionId);
-      await delay(2000);
+    // If a live socket is already in the map, close it WITHOUT deleting auth
+    // files — we want to reuse the credentials so we don't restart the whole
+    // QR handshake and cause a loop.
+    const existing = sessions.get(sessionId);
+    if (existing) {
+      try {
+        existing.ev.removeAllListeners("connection.update");
+        existing.end?.(undefined);
+      } catch (_) {}
+      sessions.delete(sessionId);
     }
 
     // Get auth state
     const sessionPath = getSessionPath(sessionId);
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
+    // The correct WA Web version is REQUIRED on Baileys 7.x — without it the
+    // socket stalls in "connecting" and never emits a QR.
+    const version = await getWaVersion();
+
     // Create socket
     const socket = makeWASocket({
       auth: state,
-      printQRInTerminal: true, // Display QR in terminal for easy scanning
+      version,
       logger,
       browser: Browsers.ubuntu("Chrome"),
+      // Keep each QR on screen longer so it doesn't churn while the user scans.
+      qrTimeout: 45_000,
+      connectTimeoutMs: 60_000,
+      keepAliveIntervalMs: 25_000,
       getMessage: async (key) => {
         return { conversation: "" };
       },
@@ -107,96 +136,22 @@ async function createSession(sessionId) {
     socket.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
-      console.log(`📡 Connection update for ${sessionId}:`, {
-        connection,
-        hasQR: !!qr,
-        updateKeys: Object.keys(update),
-      });
-
-      // ═══ CRITICAL DEBUG SECTION ═══
-      console.log(`\n🔍 === DETAILED QR DEBUG START ===`);
-      console.log(`Session: ${sessionId}`);
-      console.log(`QR exists: ${!!qr}`);
-      console.log(`QR type: ${typeof qr}`);
-      console.log(`QR value: ${qr ? qr.substring(0, 50) + '...' : 'NULL'}`);
-      console.log(`io exists: ${!!io}`);
-      console.log(`io type: ${typeof io}`);
-      
-      // Check all update keys
-      for (const key of Object.keys(update)) {
-        console.log(`Update key "${key}": ${typeof update[key]} = ${update[key]}`);
-      }
-      console.log(`=== DETAILED QR DEBUG END ===\n`);
-
-      // Emit QR code to frontend
+      // ── QR received → convert and emit to the frontend immediately ──
       if (qr) {
-        console.log(`🎯 QR data received for ${sessionId}, length: ${qr.length}`);
-        
-        // Print QR to terminal for easy scanning
-        console.log('\n' + '='.repeat(60));
-        console.log(`📱 SCAN THIS QR CODE WITH YOUR PHONE`);
-        console.log(`Session: ${sessionId}`);
-        console.log('='.repeat(60) + '\n');
-        
-        // Try to use qrcode-terminal for ASCII art display
-        let qrDisplayed = false;
-        try {
-          const QRCode = require('qrcode-terminal');
-          console.log('✅ qrcode-terminal loaded, generating ASCII QR...\n');
-          QRCode.generate(qr, { small: true });
-          qrDisplayed = true;
-          console.log('\n✅ QR Code displayed above!\n');
-        } catch (e) {
-          console.log('⚠️ qrcode-terminal error:', e.message);
-        }
-        
-        // ALWAYS show the QR URL as fallback
-        if (!qrDisplayed) {
-          console.log('📱 QR Code URL (use online QR generator if needed):');
-        }
-        console.log('\n' + qr + '\n');
-        
-        console.log('='.repeat(60));
-        console.log('Open WhatsApp → Settings → Linked Devices → Link a Device');
-        console.log('='.repeat(60) + '\n');
-        
-        if (!io) {
-          console.error(`❌ Socket.IO not available for ${sessionId}!`);
-          console.error(`   This means setSocketIO() was not called or failed.`);
-        } else {
-          console.log(`✅ Socket.IO is available, converting QR to DataURL...`);
-        }
-        
         try {
           const qrDataURL = await toDataURL(qr);
-          console.log(`📱 QR Code converted to DataURL for ${sessionId}`);
-          console.log(`   DataURL length: ${qrDataURL.length} chars`);
-
           if (io) {
-            // Emit to all connected clients
-            io.emit("qr", {
-              sessionId,
-              qr: qrDataURL,
-              timestamp: Date.now(),
-            });
-            console.log(`✅ Emitted 'qr' event globally`);
-
-            // Also emit with session-specific event
-            io.emit(`qr-${sessionId}`, {
-              sessionId,
-              qr: qrDataURL,
-              timestamp: Date.now(),
-            });
-            console.log(`✅ Emitted 'qr-${sessionId}' event`);
-
-            console.log(`🎉 QR Code successfully emitted via Socket.IO for ${sessionId}`);
+            const payload = { sessionId, qr: qrDataURL, timestamp: Date.now() };
+            io.emit("qr", payload);
+            io.emit(`qr-${sessionId}`, payload);
           }
+          // A fresh QR means the socket is healthy; reset the retry counter so
+          // a later expiry gets a full set of fresh attempts.
+          retries.set(sessionId, 0);
+          console.log(`📱 QR emitted for ${sessionId}`);
         } catch (error) {
-          console.error(`❌ Error processing QR code for ${sessionId}:`, error.message);
-          console.error(`   Stack:`, error.stack);
+          console.error(`❌ QR encode error for ${sessionId}:`, error.message);
         }
-      } else {
-        console.log(`⚠️ No QR data in this update for ${sessionId}`);
       }
 
       // Handle connection state
@@ -221,52 +176,63 @@ async function createSession(sessionId) {
       }
 
       if (connection === "close") {
-        const shouldReconnect =
-          lastDisconnect?.error?.output?.statusCode !==
-          DisconnectReason.loggedOut;
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const loggedOut = statusCode === DisconnectReason.loggedOut;
+        const restartRequired = statusCode === DisconnectReason.restartRequired;
 
         console.log(
-          `❌ Session ${sessionId} closed. Reconnect: ${shouldReconnect}`
+          `❌ Session ${sessionId} closed. statusCode: ${statusCode}, loggedOut: ${loggedOut}`
         );
 
-        if (shouldReconnect) {
-          const currentRetries = retries.get(sessionId) || 0;
+        // ── restartRequired (515): normal right after a successful QR scan /
+        //    pairing. Restart the socket immediately, REUSING the saved creds
+        //    (do NOT count as a retry, do NOT wipe auth) so it comes up online.
+        if (restartRequired) {
+          console.log(`🔁 Restart required for ${sessionId} — reconnecting with saved creds`);
+          await delay(1000);
+          await createSession(sessionId, true);
+          return;
+        }
 
-          if (currentRetries < 5) {
-            retries.set(sessionId, currentRetries + 1);
-            console.log(
-              `🔄 Reconnecting ${sessionId} (attempt ${currentRetries + 1}/5)...`
-            );
-            await delay(3000);
-            await createSession(sessionId);
-          } else {
-            console.log(`❌ Max retries reached for ${sessionId}`);
-            retries.delete(sessionId);
-            sessions.delete(sessionId);
-
-            // Update database
-            await query(
-              "UPDATE instance SET status = ? WHERE uniqueId = ?",
-              ["disconnected", sessionId]
-            );
-          }
-        } else {
-          // Logged out
+        // ── Logged out (401): the pairing was rejected or the device was
+        //    unlinked. Clean everything up.
+        if (loggedOut) {
           console.log(`🚪 Session ${sessionId} logged out`);
           sessions.delete(sessionId);
           retries.delete(sessionId);
 
-          // Update database
           await query("UPDATE instance SET status = ? WHERE uniqueId = ?", [
             "disconnected",
             sessionId,
           ]);
 
-          // Clean up session files
+          // Clean up session files so the next attempt starts fresh
           const sessionPath = getSessionPath(sessionId);
           if (fs.existsSync(sessionPath)) {
             fs.rmSync(sessionPath, { recursive: true, force: true });
           }
+          return;
+        }
+
+        // ── Any other close (network blip, QR expired unscanned, etc.).
+        //    Retry a limited number of times WITHOUT deleting auth. If the
+        //    session had never paired, this just re-shows a fresh QR.
+        const currentRetries = retries.get(sessionId) || 0;
+        if (currentRetries < 3) {
+          retries.set(sessionId, currentRetries + 1);
+          console.log(
+            `🔄 Reconnecting ${sessionId} (attempt ${currentRetries + 1}/3)...`
+          );
+          await delay(2000);
+          await createSession(sessionId, true);
+        } else {
+          console.log(`⏹️ Giving up on ${sessionId} after 3 attempts`);
+          retries.delete(sessionId);
+          sessions.delete(sessionId);
+          await query("UPDATE instance SET status = ? WHERE uniqueId = ?", [
+            "disconnected",
+            sessionId,
+          ]);
         }
       }
     });
@@ -493,7 +459,8 @@ async function init() {
       const result = await query(
         "SELECT uniqueId, status FROM instance WHERE status = 'connected' OR status = 'healthy'"
       );
-      instances = result && result[0] ? result[0] : result || [];
+      // query() resolves to the rows array directly for SELECTs.
+      instances = Array.isArray(result) ? result : [];
     } catch (error) {
       console.error('❌ Error querying instances:', error.message);
       instances = [];

@@ -78,16 +78,22 @@ async function updateChatInMysql({
     const allowedMessageTypes = ["text", "image", "document", "video", "audio"];
     const isIncoming = actualMsg?.route === "INCOMING";
 
-    // 🔥 Run profile update in background (don't wait for it)
-    setImmediate(() => {
-      updateProfileMysql({
-        chatId,
-        uid,
-        getSession,
-        remoteJid: jid,
-        sessionId,
+    // 🔥 Run profile update in background (don't wait for it).
+    // Only for INCOMING messages: an outgoing/echo message doesn't need us to
+    // query the recipient's profile, and doing so on a freshly linked session
+    // (especially toward an unknown/invalid number) can provoke WhatsApp into
+    // unlinking the device with a 401.
+    if (isIncoming) {
+      setImmediate(() => {
+        updateProfileMysql({
+          chatId,
+          uid,
+          getSession,
+          remoteJid: jid,
+          sessionId,
+        });
       });
-    });
+    }
 
     const sessionData = await getSession(sessionId);
     const originInstanceId =

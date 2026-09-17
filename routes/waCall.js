@@ -8,6 +8,7 @@ const {
   checkTags,
   checkContactLimit,
   checkWaWArmer,
+  checkWaCall,
 } = require("../middlewares/plan.js");
 const { getElevenLabsVoices } = require("../functions/function.js");
 const {
@@ -61,7 +62,7 @@ router.post("/insert_flow", validateUser, checkPlan, async (req, res) => {
 });
 
 // get flows beta
-router.get("/get_flows", validateUser, checkPlan, async (req, res) => {
+router.get("/get_flows", validateUser, checkPlan, checkWaCall, async (req, res) => {
   try {
     let data = await query(`SELECT * FROM wa_call_flows WHERE uid = ?`, [
       req.decode.uid,
@@ -247,7 +248,7 @@ router.post(
 );
 
 // get running bot
-router.get("/get_call_bot", validateUser, checkPlan, async (req, res) => {
+router.get("/get_call_bot", validateUser, checkPlan, checkWaCall, async (req, res) => {
   try {
     const data = await query(`SELECT * FROM wa_call_bot WHERE uid = ?`, [
       req.decode.uid,
@@ -376,7 +377,7 @@ router.post("/create_broadcast", validateUser, checkPlan, async (req, res) => {
 });
 
 // Get all broadcasts for user
-router.get("/get_broadcasts", validateUser, checkPlan, async (req, res) => {
+router.get("/get_broadcasts", validateUser, checkPlan, checkWaCall, async (req, res) => {
   try {
     const broadcasts = await query(
       `SELECT * FROM wa_call_broadcasts WHERE uid = ? ORDER BY created_at DESC`,

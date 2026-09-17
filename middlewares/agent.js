@@ -5,70 +5,50 @@ const validateAgent = async (req, res, next) => {
   try {
     const token = req.get("Authorization");
     if (!token) {
-      return res.json({ msg: "No token found", token: token, logout: true });
+      return res.json({ msg: "No token found", logout: true });
     }
 
-    jwt.verify(token.split(" ")[1], process.env.JWTKEY, async (err, decode) => {
-      if (err) {
-        return res.json({
-          success: 0,
-          msg: "Invalid token found, 499",
-          token,
-          logout: true,
-        });
-      } else {
-        const getAgent = await query(
-          `SELECT * FROM agents WHERE email = ? and password = ? `,
-          [decode.email, decode.password]
-        );
+    // Verify JWT synchronously to avoid async-in-callback issue
+    let decode;
+    try {
+      decode = jwt.verify(token.split(" ")[1], process.env.JWTKEY);
+    } catch (err) {
+      return res.json({ success: 0, msg: "Invalid token found", logout: true });
+    }
 
-        if (getAgent.length < 1) {
-          return res.json({
-            success: false,
-            msg: "Invalid token found, 480",
-            token,
-            logout: true,
-          });
-        }
+    if (decode.role !== "agent") {
+      return res.json({ success: 0, msg: "Unauthorized token", logout: true });
+    }
 
-        if (getAgent[0]?.is_active < 1) {
-          return res.json({
-            msg: "You are an inactive agent.",
-            logout: true,
-            success: false,
-          });
-        }
+    // DB lookups outside the JWT callback — errors are properly caught
+    const getAgent = await query(
+      `SELECT * FROM agents WHERE email = ? AND password = ?`,
+      [decode.email, decode.password]
+    );
 
-        // getting owner
-        const getOwner = await query(`SELECT * FROM user WHERE uid = ?`, [
-          getAgent[0]?.owner_uid,
-        ]);
+    if (getAgent.length < 1) {
+      return res.json({ success: false, msg: "Invalid token found", logout: true });
+    }
 
-        if (getOwner.length < 1) {
-          return res.json({
-            msg: "Agent Owner not found",
-            success: false,
-          });
-        }
+    if (getAgent[0]?.is_active < 1) {
+      return res.json({ msg: "You are an inactive agent.", logout: true, success: false });
+    }
 
-        if (decode.role === "agent") {
-          req.owner = getOwner[0];
-          req.decode = decode;
-          req.decode.userData = getAgent[0];
-          next();
-        } else {
-          return res.json({
-            success: 0,
-            msg: "Unauthorized token",
-            token: token,
-            logout: true,
-          });
-        }
-      }
-    });
+    const getOwner = await query(`SELECT * FROM user WHERE uid = ?`, [
+      getAgent[0]?.owner_uid,
+    ]);
+
+    if (getOwner.length < 1) {
+      return res.json({ msg: "Agent owner not found", success: false });
+    }
+
+    req.owner = getOwner[0];
+    req.decode = decode;
+    req.decode.userData = getAgent[0];
+    next();
   } catch (err) {
-    console.log(err);
-    res.json({ msg: "server error", err });
+    console.error("validateAgent error:", err);
+    res.json({ msg: "server error", err: err.message });
   }
 };
 

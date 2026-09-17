@@ -118,16 +118,31 @@ router.post(
         });
       }
 
-      console.log({ title, uniqueId });
+      console.log(`[gen_qr] request uid=${req.decode.uid} title=${title} uniqueId=${uniqueId}`);
 
-      await query(
-        `INSERT INTO instance (uid, title, uniqueId, status) VALUES (?,?,?,?)`,
-        [req.decode.uid, title, uniqueId, "GENERATING"],
+      // Insert the instance only if it doesn't already exist (re-generating a
+      // QR for an existing/dead instance should NOT create a duplicate row).
+      const existingRows = await query(
+        `SELECT id FROM instance WHERE uniqueId = ? AND uid = ?`,
+        [uniqueId, req.decode.uid],
       );
 
-      await createSession(
-        uniqueId,
-        title?.length > 20 ? title.slice(0, 20) : title,
+      if (existingRows.length === 0) {
+        await query(
+          `INSERT INTO instance (uid, title, uniqueId, status) VALUES (?,?,?,?)`,
+          [req.decode.uid, title, uniqueId, "GENERATING"],
+        );
+      } else {
+        await query(
+          `UPDATE instance SET status = ? WHERE uniqueId = ? AND uid = ?`,
+          ["GENERATING", uniqueId, req.decode.uid],
+        );
+      }
+
+      // Fire session creation (async). QR arrives via socket. Second arg of
+      // createSession is an internal reconnect flag, NOT the title.
+      createSession(uniqueId).catch((e) =>
+        console.error(`[gen_qr] createSession error for ${uniqueId}:`, e.message),
       );
 
       res.json({
@@ -536,12 +551,21 @@ async function processMessageRequest(params, res) {
     });
   }
 
-  const checkWarmer = await checkWarmerPlan({ uid: user.uid });
-  if (!checkWarmer) {
+  // The correct gate for this endpoint is the "rest_api_qr" plan flag (NOT the
+  // warmer flag). Read it from the user's plan snapshot.
+  let restApiAllowed = false;
+  try {
+    const planObj =
+      typeof user.plan === "string" ? JSON.parse(user.plan) : user.plan;
+    restApiAllowed = parseInt(planObj?.rest_api_qr) > 0;
+  } catch {
+    restApiAllowed = false;
+  }
+  if (!restApiAllowed) {
     return res.status(403).json({
       success: false,
-      message: "Your subscription plan does not allow Rest API QR function.",
-      actionRequired: "Get a plan which has QR Rest API in it",
+      message: "Your subscription plan does not allow the QR REST API.",
+      actionRequired: "Get a plan which includes the QR REST API",
     });
   }
 
@@ -556,18 +580,24 @@ async function processMessageRequest(params, res) {
     });
   }
 
-  // Validate instance
+  // Validate instance. Connected QR devices are stored with status "connected"
+  // (lowercase); older rows may use "ACTIVE"/"healthy". Accept any of these so
+  // the API can actually find the sending device.
   const formattedFrom = params.from.replace("+", "");
   const [instance] = await query(
-    `SELECT * FROM instance WHERE uid = ? AND number = ? AND status = ?`,
-    [user.uid, formattedFrom, "ACTIVE"],
+    `SELECT * FROM instance
+       WHERE uid = ? AND number = ?
+         AND LOWER(status) IN ('connected', 'active', 'healthy')
+       LIMIT 1`,
+    [user.uid, formattedFrom],
   );
 
   if (!instance) {
     return res.status(404).json({
       success: false,
       message: `No active WhatsApp instance found for number ${params.from}.`,
-      solution: "Please ensure you have an active instance with this number",
+      solution:
+        "Ensure a WhatsApp QR device with this exact number is connected. Use the number without a leading '+'.",
     });
   }
 

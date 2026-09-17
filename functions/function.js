@@ -2429,19 +2429,41 @@ function getUserOrderssByMonth(orders) {
 }
 
 function getNumberOfDaysFromTimestamp(timestamp) {
-  if (!timestamp || isNaN(timestamp)) {
-    return 0; // Invalid timestamp
+  // Normalize whatever is stored in plan_expire into a numeric ms epoch.
+  // It may be: a number (ms), a numeric string, a MySQL datetime string
+  // ("2026-09-15 12:00:00"), an ISO string, or a Date. Older code wrote a
+  // datetime STRING here, which isNaN() rejected → every plan read as expired.
+  let ms = null;
+  if (timestamp == null || timestamp === "") {
+    return 0;
+  }
+  if (timestamp instanceof Date) {
+    ms = timestamp.getTime();
+  } else if (typeof timestamp === "number") {
+    ms = timestamp;
+  } else {
+    const str = String(timestamp).trim();
+    if (/^\d+$/.test(str)) {
+      // Pure digits = epoch milliseconds.
+      ms = parseInt(str, 10);
+    } else {
+      // Datetime/ISO string. Treat a space-separated MySQL datetime as UTC.
+      const parsed = Date.parse(str.includes("T") ? str : str.replace(" ", "T"));
+      ms = isNaN(parsed) ? NaN : parsed;
+    }
+  }
+
+  if (ms == null || isNaN(ms)) {
+    return 0; // Could not parse
   }
 
   const currentTimestamp = Date.now();
-  if (timestamp <= currentTimestamp) {
+  if (ms <= currentTimestamp) {
     return 0; // Timestamp is in the past or current time
   }
 
   const millisecondsInADay = 1000 * 60 * 60 * 24;
-  const differenceInDays = Math.ceil(
-    (timestamp - currentTimestamp) / millisecondsInADay,
-  );
+  const differenceInDays = Math.ceil((ms - currentTimestamp) / millisecondsInADay);
   return differenceInDays;
 }
 
@@ -3015,6 +3037,20 @@ async function sendTemplateMessage(
   // Add button variables if provided
   if (buttonVariables && buttonVariables.length > 0) {
     buttonVariables.forEach((buttonVar, index) => {
+      // FLOW button — requires its own component with sub_type "flow" and empty parameters
+      if (buttonVar.sub_type === "flow") {
+        const flowButtonComponent = {
+          type: "button",
+          sub_type: "flow",
+          index: buttonVar.index.toString(),
+          parameters: [],
+        };
+        messagePayload.template.components.push(flowButtonComponent);
+        console.log('🔗 Added FLOW button component at index', buttonVar.index);
+        return;
+      }
+
+      // URL button with dynamic parameter
       if (buttonVar.value) {
         const buttonComponent = {
           type: "button",
@@ -3768,103 +3804,192 @@ async function processImage({ sourcePath, savingPath, width, height }) {
 }
 
 function serializeNodeSchema(nodeSchemas) {
-  return nodeSchemas.map((n) => ({
-    id: n.id,
-    nodeType: n.nodeType,
-    category: n.category,
-    description: n.description,
-    defaultMoveToNextNode: n.data?.moveToNextNode ?? false,
-    dataShape: n.data,
-  }));
+  // nodeSchemas from frontend only has { type, name, description, category }
+  // We ignore the frontend list and use the canonical schema below so the AI
+  // always gets the exact types + data fields the FlowBuilder understands.
+  return [
+    {
+      nodeType: "initial",
+      description: "Start of every flow — always the first node, id must be 'initialNode'",
+      moveToNextNode: true,
+      dataFields: { source: "string — e.g. 'Chatbot'" },
+    },
+    {
+      nodeType: "message",
+      description: "Send a text/media message to the user. Set moveToNextNode:false to wait for a reply, true to continue immediately.",
+      moveToNextNode: false,
+      dataFields: { message: "string — the message text to send" },
+    },
+    {
+      nodeType: "responseSaver",
+      description: "Save the user's last reply into a named variable for later use with {{variableName}}.",
+      moveToNextNode: true,
+      dataFields: { variableName: "string — variable name (no spaces, e.g. userName)" },
+    },
+    {
+      nodeType: "condition",
+      description: "Branch the flow based on a value. Has two source handles: 'a' (match) and 'b' (default).",
+      moveToNextNode: true,
+      dataFields: {
+        conditionLabel: "string — what is being checked",
+        conditionValue: "string — value to match against",
+        matchType: "string — 'Exact Match' | 'Contains' | 'Starts With'",
+      },
+    },
+    {
+      nodeType: "delay",
+      description: "Pause the flow for N seconds.",
+      moveToNextNode: true,
+      dataFields: { seconds: "number — seconds to wait" },
+    },
+    {
+      nodeType: "chatLabels",
+      description: "Add one or more labels to the chat.",
+      moveToNextNode: true,
+      dataFields: { labels: "string[] — array of label names" },
+    },
+    {
+      nodeType: "disableAutoReply",
+      description: "Stop the bot from replying to this contact (hand off to human).",
+      moveToNextNode: true,
+      dataFields: {},
+    },
+    {
+      nodeType: "resetSession",
+      description: "Clear all saved variables for this session.",
+      moveToNextNode: true,
+      dataFields: {},
+    },
+    {
+      nodeType: "httpRequest",
+      description: "Call an external API endpoint.",
+      moveToNextNode: true,
+      dataFields: {
+        method: "string — GET | POST | PUT | DELETE",
+        url: "string — full URL",
+        body: "string — JSON body (optional)",
+      },
+    },
+    {
+      nodeType: "agentTransfer",
+      description: "Hand the conversation off to a human agent.",
+      moveToNextNode: true,
+      dataFields: { agentId: "string — optional specific agent ID" },
+    },
+    {
+      nodeType: "aiTransfer",
+      description: "Hand the conversation off to an AI assistant (PRO feature).",
+      moveToNextNode: true,
+      dataFields: {},
+    },
+  ];
 }
 
 function buildSystemPrompt(nodeSchemas) {
   const schemaStr = JSON.stringify(serializeNodeSchema(nodeSchemas), null, 2);
 
-  return `You are an expert WhatsApp chatbot flow builder assistant.
-Your job is to generate or modify a React Flow graph ({ nodes, edges }) based on user instructions.
+  return `You are an expert WhatsApp chatbot flow builder. Generate React Flow graphs for WhatsCRM.
 
-## RULES
-1. Always return ONLY valid JSON in this exact shape:
-   { "nodes": [...], "edges": [...] }
-   No markdown, no explanation, no code fences — raw JSON only.
+## OUTPUT FORMAT
+Return ONLY raw JSON — no markdown fences, no explanation:
+{ "nodes": [...], "edges": [...] }
 
-2. Node structure:
-   {
-     "id": "<unique string>",
-     "type": "<nodeType from schema>",
-     "position": { "x": <number>, "y": <number> },
-     "data": { ...fields matching the schema for that nodeType }
-   }
+## NODE STRUCTURE
+{
+  "id": "<short descriptive id>",
+  "type": "<nodeType — MUST be one from the schema below>",
+  "position": { "x": <number>, "y": <number> },
+  "data": { <fields matching that nodeType's dataFields> }
+}
 
-3. Edge structure:
-   {
-     "id": "<unique string>",
-     "source": "<nodeId>",
-     "target": "<nodeId>",
-     "sourceHandle": "<handleId or null>",
-     "type": "smoothstep",
-     "animated": false
-   }
+## EDGE STRUCTURE
+{
+  "id": "<e_source_target>",
+  "source": "<nodeId>",
+  "target": "<nodeId>",
+  "sourceHandle": "<handle id or null>",
+  "type": "smoothstep",
+  "animated": false
+}
 
-4. ALWAYS include the initialNode:
-   {
-     "id": "initialNode",
-     "type": "INITIAL",
-     "position": { "x": 100, "y": 300 },
-     "data": { "whPhonePath": "" }
-   }
-   The first edge must go FROM "initialNode" to the first real node.
+## MANDATORY RULES
+1. ALWAYS start with the initialNode:
+   { "id": "initialNode", "type": "initial", "position": { "x": 100, "y": 300 }, "data": { "source": "Chatbot" } }
+   First edge must go FROM "initialNode".
 
-5. moveToNextNode: Use EXACTLY the defaultMoveToNextNode from the schema for each nodeType.
-   NEVER override it unless the flow logic absolutely requires it.
-   - false = node WAITS for user reply before continuing
-   - true  = node continues automatically without waiting
+2. Use ONLY these exact type strings (case-sensitive, lowercase camelCase):
+   initial | message | responseSaver | condition | delay | chatLabels |
+   disableAutoReply | resetSession | httpRequest | agentTransfer | aiTransfer
 
-6. Node positioning: lay nodes out left-to-right, x += 350 per step, y centered around 300.
-   For branches (CONDITION), offset y by ±200 for each branch.
+3. Collecting user input: use a "message" node (moveToNextNode omitted = waits for reply),
+   then a "responseSaver" node to save the answer.
 
-7. CONDITION nodes: each condition needs a unique targetNodeId (sourceHandle on the edge).
-   Always include a "default" branch edge (sourceHandle: "default").
+4. Branching: "condition" node has TWO source edges:
+   - sourceHandle: "a"  → match path
+   - sourceHandle: "b"  → default/else path
 
-8. For SEND_MESSAGE nodes, always fill content with a placeholder message.
+5. Positioning: x increases by 350 per step. y centered at 300.
+   Branch paths: offset y by +200 (match) and -200 (default) then re-converge.
 
-9. Keep node IDs short and descriptive: "msg_welcome", "cond_choice", "delay_1" etc.
+6. Node IDs: short + descriptive. Examples: "msg_welcome", "save_name", "cond_budget", "delay_1", "msg_confirm"
 
-## AVAILABLE NODE TYPES & SCHEMAS
+## CONCRETE EXAMPLE
+For "Ask name, save it, then say hello":
+{
+  "nodes": [
+    { "id": "initialNode",  "type": "initial",       "position": {"x":100,"y":300}, "data": {"source":"Chatbot"} },
+    { "id": "msg_ask",      "type": "message",        "position": {"x":450,"y":300}, "data": {"message":"Hi! What is your name?"} },
+    { "id": "save_name",    "type": "responseSaver",  "position": {"x":800,"y":300}, "data": {"variableName":"userName"} },
+    { "id": "msg_greet",    "type": "message",        "position": {"x":1150,"y":300},"data": {"message":"Hello {{userName}}! Welcome 😊"} }
+  ],
+  "edges": [
+    { "id": "e1", "source": "initialNode", "target": "msg_ask",   "sourceHandle": null, "type": "smoothstep", "animated": false },
+    { "id": "e2", "source": "msg_ask",     "target": "save_name", "sourceHandle": null, "type": "smoothstep", "animated": false },
+    { "id": "e3", "source": "save_name",   "target": "msg_greet", "sourceHandle": null, "type": "smoothstep", "animated": false }
+  ]
+}
+
+## AVAILABLE NODE SCHEMAS
 ${schemaStr}
 
-## FLOW LOGIC GUIDE
-- User sends message → INITIAL NODE (always first)
-- To collect user input: SEND_MESSAGE (ask question) → RESPONSE_SAVER (save answer) → next step
-- To branch: CONDITION node (moveToNextNode: true, runs immediately)
-- To pause and wait for reply: SEND_MESSAGE with moveToNextNode: false
-- To call API: MAKE_REQUEST (moveToNextNode: true)
-- To add delay: DELAY node
-- AI_TRANSFER: hands off to AI, stays there until function call routes back
+## FLOW PATTERNS
+- Ask question + save reply:  message → responseSaver → next
+- Branch on value:            condition (sourceHandle "a" = match, "b" = default)
+- Pause N seconds:            delay
+- Hand to human:              disableAutoReply OR agentTransfer
+- External API call:          httpRequest → message (show result)
+- Add labels:                 chatLabels (moveToNextNode: true, continues immediately)
 `;
 }
 
 function buildUserPrompt(instruction, currentFlow, mode) {
   if (mode === "edit" && currentFlow) {
-    return `You are EDITING an existing flow.
+    return `You are EDITING an existing WhatsApp chatbot flow.
 
 Current flow:
 ${JSON.stringify(currentFlow, null, 2)}
 
 User instruction: "${instruction}"
 
-Return the complete updated { nodes, edges } JSON.
-Keep all existing nodes/edges unless the instruction says to remove them.
-Maintain existing node IDs where possible.
-Only change what the instruction asks for.`;
+Return the COMPLETE updated { nodes, edges } JSON.
+- Keep all existing nodes/edges unless the instruction says to remove them.
+- Maintain existing node IDs where possible.
+- Only change what the instruction asks for.
+- MUST use only these exact type strings: initial | message | responseSaver | condition | delay | chatLabels | disableAutoReply | resetSession | httpRequest | agentTransfer | aiTransfer`;
   }
 
-  return `Create a new chatbot flow for this use case:
+  return `Create a new WhatsApp chatbot flow for this use case:
 
 "${instruction}"
 
-Return { nodes, edges } JSON following all the rules.`;
+Requirements:
+- Use ONLY these node types (exact lowercase camelCase): initial | message | responseSaver | condition | delay | chatLabels | disableAutoReply | resetSession | httpRequest | agentTransfer | aiTransfer
+- Always start with initialNode (type: "initial")
+- To ask a question and wait for reply: use "message" node
+- To save the user's reply into a variable: use "responseSaver" node immediately after
+- To branch based on a value: use "condition" node with sourceHandle "a" (match) and "b" (default)
+- Use {{variableName}} syntax in message text to reference saved variables
+- Return ONLY raw JSON: { "nodes": [...], "edges": [...] }`;
 }
 
 async function callOpenAI(apiKey, model, systemPrompt, userPrompt) {
@@ -3877,7 +4002,7 @@ async function callOpenAI(apiKey, model, systemPrompt, userPrompt) {
         { role: "user", content: userPrompt },
       ],
       temperature: 0.3,
-      max_tokens: 4000,
+      max_tokens: 8000,
       response_format: { type: "json_object" },
     },
     {
@@ -3898,7 +4023,7 @@ async function callGemini(apiKey, model, systemPrompt, userPrompt) {
     model,
     generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 4000,
+      maxOutputTokens: 8000,
       responseMimeType: "application/json",
     },
     systemInstruction: { parts: [{ text: systemPrompt }], role: "system" },
@@ -3919,7 +4044,7 @@ async function callDeepSeek(apiKey, model, systemPrompt, userPrompt) {
         { role: "user", content: userPrompt },
       ],
       temperature: 0.3,
-      max_tokens: 4000,
+      max_tokens: 8000,
     },
     {
       headers: {
@@ -3930,6 +4055,47 @@ async function callDeepSeek(apiKey, model, systemPrompt, userPrompt) {
     },
   );
   return response.data.choices[0].message.content;
+}
+
+async function callOpenRouter(apiKey, model, systemPrompt, userPrompt) {
+  const response = await axios.post(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user",   content: userPrompt   },
+      ],
+      temperature: 0.3,
+      max_tokens: 8000,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://whatscrm.app",
+        "X-Title": "WhatsCRM AI Flow Builder",
+      },
+      timeout: 120000,   // 2 minutes — free models can be slow
+    },
+  );
+
+  // OpenRouter returns errors inside the 200 response body
+  if (response.data?.error) {
+    const err = response.data.error;
+    const hint = err.code === 404
+      ? " The model slug may be wrong or the free tier has been removed."
+      : err.code === 429
+      ? " This free model is rate-limited. Try 'openrouter/free' or a different model."
+      : err.code === 400 && err.message?.includes("rerank")
+      ? " This is a rerank model, not a chat model. Choose a different model."
+      : err.code === 400 && err.message?.includes("embedding")
+      ? " This is an embedding model, not a chat model. Choose a different model."
+      : "";
+    throw new Error((err.message || "OpenRouter error") + hint);
+  }
+
+  return response.data.choices[0]?.message?.content ?? null;
 }
 
 async function handleWAFormSubmission(change, userUID) {
@@ -4220,6 +4386,7 @@ module.exports = {
   callOpenAI,
   callGemini,
   callDeepSeek,
+  callOpenRouter,
   removeTokenFromAll,
   sendFCMNotification,
   translateWithOpenAI,

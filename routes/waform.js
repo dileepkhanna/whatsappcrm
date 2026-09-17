@@ -231,7 +231,7 @@ router.get(
 );
 
 // ─── GET ALL FORMS ────────────────────────────────────────────────────────────
-router.get("/get-forms", validateUser, checkPlan, async (req, res) => {
+router.get("/get-forms", validateUser, checkPlan, checkWaForms, async (req, res) => {
   try {
     const forms = await query(
       `SELECT * FROM wa_forms WHERE uid = ? ORDER BY createdAt DESC`,
@@ -1281,7 +1281,7 @@ router.post("/submit", async (req, res) => {
 });
 
 // ─── GET SUBMISSIONS ──────────────────────────────────────────────────────────
-router.get("/submissions", validateUser, async (req, res) => {
+router.get("/submissions", validateUser, checkPlan, checkWaForms, async (req, res) => {
   try {
     const data = await query(
       `SELECT * FROM wa_form_submissions WHERE uid = ? ORDER BY createdAt DESC`,
@@ -1305,7 +1305,7 @@ router.get("/submissions", validateUser, async (req, res) => {
 });
 
 // ─── DELETE SUBMISSIONS (bulk) ────────────────────────────────────────────────
-router.post("/delete-submissions", validateUser, async (req, res) => {
+router.post("/delete-submissions", validateUser, checkPlan, checkWaForms, async (req, res) => {
   try {
     const { ids } = req.body; // array of submission IDs
     if (!Array.isArray(ids) || ids.length === 0)

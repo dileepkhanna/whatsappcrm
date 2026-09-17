@@ -2,6 +2,55 @@ const jwt = require("jsonwebtoken");
 const { query } = require("../database/dbpromise");
 const { getNumberOfDaysFromTimestamp } = require("../functions/function");
 
+/**
+ * Resolve the EFFECTIVE plan for a user.
+ *
+ * user.plan is a frozen JSON snapshot taken at subscribe time, so admin edits
+ * to a plan's permissions would otherwise never reach existing subscribers.
+ * We re-read the live plan row by its id so permission changes apply instantly.
+ * Falls back to the stored snapshot if the plan row was deleted.
+ */
+const resolveEffectivePlan = async (rawPlan) => {
+  if (!rawPlan) return null;
+  let snapshot;
+  try {
+    snapshot = typeof rawPlan === "string" ? JSON.parse(rawPlan) : rawPlan;
+  } catch {
+    return null;
+  }
+  if (!snapshot || typeof snapshot !== "object") return null;
+
+  try {
+    let live = null;
+
+    // 1. Try to match the live plan by id.
+    if (snapshot.id) {
+      const rows = await query(`SELECT * FROM plan WHERE id = ?`, [
+        snapshot.id,
+      ]);
+      live = rows[0] || null;
+    }
+
+    // 2. Fall back to matching by title (handles snapshots with a missing id,
+    //    or plans that were deleted and recreated with a new id).
+    if (!live && snapshot.title) {
+      const rows = await query(`SELECT * FROM plan WHERE title = ? LIMIT 1`, [
+        snapshot.title,
+      ]);
+      live = rows[0] || null;
+    }
+
+    if (!live) return snapshot;
+
+    // Merge: live flags win, but keep any snapshot-only fields (e.g. purchase
+    // metadata) that the live row doesn't have.
+    return { ...snapshot, ...live };
+  } catch (e) {
+    console.error("resolveEffectivePlan error:", e.message);
+    return snapshot;
+  }
+};
+
 const checkPlan = async (req, res, next) => {
   try {
     if (req.owner) {
@@ -28,7 +77,9 @@ const checkPlan = async (req, res, next) => {
         msg: "Your plan was expired. Please buy a plan",
       });
     } else {
-      req.plan = JSON.parse(getUser[0]?.plan);
+      // Use the LIVE plan flags so admin permission changes take effect
+      // immediately, not the frozen snapshot stored on the user.
+      req.plan = (await resolveEffectivePlan(plan)) || JSON.parse(plan);
       next();
     }
   } catch (err) {
@@ -107,6 +158,19 @@ const checkWaWArmer = async (req, res, next) => {
 const checkQrScan = async (req, res, next) => {
   try {
     if (req.plan?.qr_account > 0) {
+      // Re-generating a QR for an instance the user already owns must NOT be
+      // blocked by the limit — it doesn't add a new instance.
+      const bodyUniqueId = req.body?.uniqueId;
+      if (bodyUniqueId) {
+        const existing = await query(
+          `SELECT id FROM instance WHERE uniqueId = ? AND uid = ?`,
+          [bodyUniqueId, req.decode.uid],
+        );
+        if (existing.length > 0) {
+          return next();
+        }
+      }
+
       const accounts = parseInt(req?.plan?.qr_account) || 0;
       const instances = await query(`SELECT * FROM instance WHERE uid = ?`, [
         req.decode.uid,
@@ -114,6 +178,7 @@ const checkQrScan = async (req, res, next) => {
 
       if (instances?.length >= accounts) {
         return res.json({
+          success: false,
           msg: `Your plan allows you to add ${accounts} instances only`,
         });
       }
@@ -121,6 +186,7 @@ const checkQrScan = async (req, res, next) => {
       next();
     } else {
       return res.json({
+        success: false,
         msg: "Your plan does not allow you this feature",
       });
     }
@@ -175,6 +241,70 @@ const checkWaForms = async (req, res, next) => {
   }
 };
 
+const checkWaCall = async (req, res, next) => {
+  try {
+    if (req.plan?.allow_wa_call > 0) {
+      next();
+    } else {
+      return res.json({
+        success: false,
+        msg: "Your plan does not include AI WhatsApp Calling",
+      });
+    }
+  } catch (err) {
+    console.log(err);
+    res.json({ msg: "server error", err });
+  }
+};
+
+const checkWebhook = async (req, res, next) => {
+  try {
+    if (req.plan?.allow_webhook > 0) {
+      next();
+    } else {
+      return res.json({
+        success: false,
+        msg: "Your plan does not include Webhook Automation",
+      });
+    }
+  } catch (err) {
+    console.log(err);
+    res.json({ msg: "server error", err });
+  }
+};
+
+const checkChatWidget = async (req, res, next) => {
+  try {
+    if (req.plan?.allow_chat_widget > 0) {
+      next();
+    } else {
+      return res.json({
+        success: false,
+        msg: "Your plan does not include the Chat Widget",
+      });
+    }
+  } catch (err) {
+    console.log(err);
+    res.json({ msg: "server error", err });
+  }
+};
+
+const checkAgents = async (req, res, next) => {
+  try {
+    if (req.plan?.allow_agents > 0) {
+      next();
+    } else {
+      return res.json({
+        success: false,
+        msg: "Your plan does not include Team Agents",
+      });
+    }
+  } catch (err) {
+    console.log(err);
+    res.json({ msg: "server error", err });
+  }
+};
+
 module.exports = {
   checkPlan,
   checkContactLimit,
@@ -185,4 +315,9 @@ module.exports = {
   checkWaForms,
   checkInstaInbox,
   checkTeleInbox,
+  checkWaCall,
+  checkWebhook,
+  checkChatWidget,
+  checkAgents,
+  resolveEffectivePlan,
 };

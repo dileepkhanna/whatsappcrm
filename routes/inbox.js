@@ -27,6 +27,8 @@ const validateUser = require("../middlewares/user.js");
 const { getIOInstance } = require("../socket.js");
 const { checkPlan } = require("../middlewares/plan.js");
 const { processMessage } = require("../helper/inbox/inbox.js");
+const { sendQrMsg } = require("../helper/socket/function.js");
+const { saveMessageToConversation } = require("../functions/function.js");
 const con = require("../database/config.js");
 const { updateMessageStatus } = require("../loops/campaignBeta.js");
 const {
@@ -50,6 +52,94 @@ function logToFile(label, data) {
   } catch (err) {
     // silent fail — never crash the webhook
   }
+}
+
+/**
+ * Send an inbox message through the correct channel based on the chat's origin.
+ *
+ * - origin "qr"  → sends via the connected Baileys session (sendQrMsg) and
+ *   persists the OUTGOING message to beta_conversation + beta_chats.
+ * - anything else → the existing Meta Cloud API path (sendMetaMsg).
+ *
+ * `msgContext` is the Meta-style message context, e.g.
+ *   { type: "text", text: { body } }  or  { type: "image", image: { link, caption } }
+ *
+ * Returns the same { success, ... } shape the routes already send back.
+ */
+async function sendInboxMessage({ uid, toNumber, toName, chatId, msgContext }) {
+  // Look up the chat to determine its channel.
+  const [chatInfo] = await query(
+    `SELECT * FROM beta_chats WHERE chat_id = ? AND uid = ? LIMIT 1`,
+    [chatId, uid],
+  );
+  const origin = chatInfo?.origin || "meta";
+
+  // ── QR (Baileys) channel ────────────────────────────────────────────────
+  if (origin === "qr") {
+    if (!chatInfo) return { success: false, msg: "Chat not found" };
+
+    console.log("[QR-SEND] attempting", {
+      uid,
+      to: toNumber,
+      chat_id: chatInfo.chat_id,
+      type: msgContext?.type,
+    });
+
+    const sendMsg = await sendQrMsg({
+      uid,
+      to: toNumber,
+      msgObj: msgContext,
+      chatInfo,
+    });
+
+    console.log("[QR-SEND] result", sendMsg);
+
+    if (!sendMsg?.success) {
+      return {
+        success: false,
+        msg: sendMsg?.msg || "Failed to send via WhatsApp QR",
+      };
+    }
+
+    const messageData = {
+      type: msgContext.type,
+      metaChatId: sendMsg.id || "",
+      msgContext,
+      reaction: "",
+      timestamp: Math.round(Date.now() / 1000),
+      senderName: toName,
+      senderMobile: toNumber,
+      star: 0,
+      route: "OUTGOING",
+      context: null,
+      origin: "qr",
+    };
+
+    await saveMessageToConversation({ uid, chatId, messageData });
+    await query(
+      `UPDATE beta_chats SET last_message = ? WHERE chat_id = ? AND uid = ?`,
+      [JSON.stringify(messageData), chatId, uid],
+    );
+
+    return { success: true, msg: "Message sent", id: sendMsg.id };
+  }
+
+  // ── Meta Cloud API channel (default) ──────────────────────────────────────
+  const metaMsgObj = { type: msgContext.type, [msgContext.type]: msgContext[msgContext.type] };
+  const savObj = {
+    type: msgContext.type,
+    metaChatId: "",
+    msgContext,
+    reaction: "",
+    timestamp: "",
+    senderName: toName,
+    senderMobile: toNumber,
+    status: "sent",
+    star: false,
+    route: "OUTGOING",
+  };
+
+  return sendMetaMsg(uid, metaMsgObj, toNumber, savObj, chatId);
 }
 
 // ✅ Appends a webhook payload object to data.json in the same directory
@@ -825,40 +915,16 @@ router.post("/send_image", validateUser, checkPlan, async (req, res) => {
       return res.json({ success: false, msg: "Not enough input provided" });
     }
 
-    const msgObj = {
-      type: "image",
-      image: {
-        link: url,
-        caption: caption || "",
-      },
-    };
-
-    const savObj = {
-      type: "image",
-      metaChatId: "",
+    const resp = await sendInboxMessage({
+      uid: req.decode.uid,
+      toNumber,
+      toName,
+      chatId,
       msgContext: {
         type: "image",
-        image: {
-          link: url,
-          caption: caption || "",
-        },
+        image: { link: url, caption: caption || "" },
       },
-      reaction: "",
-      timestamp: "",
-      senderName: toName,
-      senderMobile: toNumber,
-      status: "sent",
-      star: false,
-      route: "OUTGOING",
-    };
-
-    const resp = await sendMetaMsg(
-      req.decode.uid,
-      msgObj,
-      toNumber,
-      savObj,
-      chatId,
-    );
+    });
     res.json(resp);
   } catch (err) {
     console.log(err);
@@ -875,40 +941,16 @@ router.post("/send_video", validateUser, checkPlan, async (req, res) => {
       return res.json({ success: false, msg: "Not enough input provided" });
     }
 
-    const msgObj = {
-      type: "video",
-      video: {
-        link: url,
-        caption: caption || "",
-      },
-    };
-
-    const savObj = {
-      type: "video",
-      metaChatId: "",
+    const resp = await sendInboxMessage({
+      uid: req.decode.uid,
+      toNumber,
+      toName,
+      chatId,
       msgContext: {
         type: "video",
-        video: {
-          link: url,
-          caption: caption || "",
-        },
+        video: { link: url, caption: caption || "" },
       },
-      reaction: "",
-      timestamp: "",
-      senderName: toName,
-      senderMobile: toNumber,
-      status: "sent",
-      star: false,
-      route: "OUTGOING",
-    };
-
-    const resp = await sendMetaMsg(
-      req.decode.uid,
-      msgObj,
-      toNumber,
-      savObj,
-      chatId,
-    );
+    });
     res.json(resp);
   } catch (err) {
     console.log(err);
@@ -925,40 +967,16 @@ router.post("/send_doc", validateUser, checkPlan, async (req, res) => {
       return res.json({ success: false, msg: "Not enough input provided" });
     }
 
-    const msgObj = {
-      type: "document",
-      document: {
-        link: url,
-        caption: caption || "",
-      },
-    };
-
-    const savObj = {
-      type: "document",
-      metaChatId: "",
+    const resp = await sendInboxMessage({
+      uid: req.decode.uid,
+      toNumber,
+      toName,
+      chatId,
       msgContext: {
         type: "document",
-        document: {
-          link: url,
-          caption: caption || "",
-        },
+        document: { link: url, caption: caption || "" },
       },
-      reaction: "",
-      timestamp: "",
-      senderName: toName,
-      senderMobile: toNumber,
-      status: "sent",
-      star: false,
-      route: "OUTGOING",
-    };
-
-    const resp = await sendMetaMsg(
-      req.decode.uid,
-      msgObj,
-      toNumber,
-      savObj,
-      chatId,
-    );
+    });
     res.json(resp);
   } catch (err) {
     console.log(err);
@@ -975,38 +993,16 @@ router.post("/send_audio", validateUser, checkPlan, async (req, res) => {
       return res.json({ success: false, msg: "Not enough input provided" });
     }
 
-    const msgObj = {
-      type: "audio",
-      audio: {
-        link: url,
-      },
-    };
-
-    const savObj = {
-      type: "audio",
-      metaChatId: "",
+    const resp = await sendInboxMessage({
+      uid: req.decode.uid,
+      toNumber,
+      toName,
+      chatId,
       msgContext: {
         type: "audio",
-        audio: {
-          link: url,
-        },
+        audio: { link: url },
       },
-      reaction: "",
-      timestamp: "",
-      senderName: toName,
-      senderMobile: toNumber,
-      status: "sent",
-      star: false,
-      route: "OUTGOING",
-    };
-
-    const resp = await sendMetaMsg(
-      req.decode.uid,
-      msgObj,
-      toNumber,
-      savObj,
-      chatId,
-    );
+    });
     res.json(resp);
   } catch (err) {
     console.log(err);
@@ -1023,40 +1019,16 @@ router.post("/send_text", validateUser, checkPlan, async (req, res) => {
       return res.json({ success: false, msg: "Not enough input provided" });
     }
 
-    const msgObj = {
-      type: "text",
-      text: {
-        preview_url: true,
-        body: text,
-      },
-    };
-
-    const savObj = {
-      type: "text",
-      metaChatId: "",
+    const resp = await sendInboxMessage({
+      uid: req.decode.uid,
+      toNumber,
+      toName,
+      chatId,
       msgContext: {
         type: "text",
-        text: {
-          preview_url: true,
-          body: text,
-        },
+        text: { preview_url: true, body: text },
       },
-      reaction: "",
-      timestamp: "",
-      senderName: toName,
-      senderMobile: toNumber,
-      status: "sent",
-      star: false,
-      route: "OUTGOING",
-    };
-
-    const resp = await sendMetaMsg(
-      req.decode.uid,
-      msgObj,
-      toNumber,
-      savObj,
-      chatId,
-    );
+    });
     res.json(resp);
   } catch (err) {
     console.log(err);
@@ -1271,16 +1243,138 @@ router.get("/import_chats_from_v3", validateUser, async (req, res) => {
 router.post("/start_new_conversation", validateUser, async (req, res) => {
   try {
     const { phone, name } = req.body;
+    // Optional channel controls sent by the frontend:
+    //   origin: "qr" | "meta"  (which channel to start the chat on)
+    //   instanceId: uniqueId of a specific connected QR device (optional)
+    let origin = (req.body.origin || "").toLowerCase();
+    const instanceId = req.body.instanceId;
+    const uid = req.decode.uid;
 
     if (!phone) {
       return res.json({ success: false, msg: "Phone number is required" });
     }
 
     // Clean phone number (remove spaces, dashes, plus sign, etc.)
-    const cleanPhone = phone.replace(/[^\d]/g, ''); // Remove everything except digits
+    const cleanPhone = phone.replace(/[^\d]/g, ""); // Remove everything except digits
 
+    if (!cleanPhone) {
+      return res.json({ success: false, msg: "Invalid phone number format" });
+    }
+
+    // ── Decide the channel ────────────────────────────────────────────────
+    // If the caller didn't explicitly ask for a channel, auto-detect:
+    // prefer Meta when it's configured, otherwise fall back to a connected
+    // QR device so a brand-new chat can still be started.
+    if (origin !== "qr" && origin !== "meta") {
+      const [metaApi] = await query(
+        `SELECT id FROM meta_api WHERE uid = ? LIMIT 1`,
+        [uid],
+      );
+      const metaReady = !!metaApi;
+      origin = metaReady ? "meta" : "qr";
+    }
+
+    // ── QR (Baileys) channel ──────────────────────────────────────────────
+    if (origin === "qr") {
+      // Find the QR device to send from: the requested one (if connected) or
+      // the user's first connected instance.
+      let instance;
+      if (instanceId) {
+        const rows = await query(
+          `SELECT number, uniqueId FROM instance WHERE uid = ? AND uniqueId = ? AND status = 'connected' LIMIT 1`,
+          [uid, instanceId],
+        );
+        instance = rows[0];
+      }
+      if (!instance) {
+        const rows = await query(
+          `SELECT number, uniqueId FROM instance WHERE uid = ? AND status = 'connected' AND number IS NOT NULL AND number <> '' LIMIT 1`,
+          [uid],
+        );
+        instance = rows[0];
+      }
+
+      if (!instance || !instance.number) {
+        return res.json({
+          success: false,
+          msg: "No connected WhatsApp QR device found. Connect a device first.",
+        });
+      }
+
+      const chatId = `${instance.number}_${cleanPhone}_${uid}`;
+
+      const existingChat = await query(
+        `SELECT * FROM beta_chats WHERE chat_id = ? LIMIT 1`,
+        [chatId],
+      );
+      if (existingChat.length > 0) {
+        return res.json({
+          success: true,
+          msg: "Chat already exists",
+          chatId: existingChat[0].chat_id,
+          data: existingChat[0],
+        });
+      }
+
+      const lastMessagePayload = {
+        type: "text",
+        metaChatId: "",
+        msgContext: { type: "text", text: { body: "New conversation started" } },
+        reaction: "",
+        timestamp: Math.floor(Date.now() / 1000),
+        senderName: name || cleanPhone,
+        senderMobile: cleanPhone,
+        star: "0",
+        route: "OUTGOING",
+        context: null,
+        origin: "qr",
+      };
+
+      // Store origin_instance_id as a JSON object, matching how incoming QR
+      // chats persist it (see helper/addon/qr/processThings.js). The `id` MUST
+      // carry a ":"/"@" suffix because sendQrMsg -> extractFinalNumber ->
+      // extractPhoneNumber only extracts a number when the id looks like a
+      // WhatsApp JID (e.g. "919948318650:1@s.whatsapp.net"). A bare number
+      // would make sendQrMsg reject with "Session is not ready yet".
+      const originInstanceId = JSON.stringify({
+        id: `${instance.number}:1@s.whatsapp.net`,
+        uniqueId: instance.uniqueId,
+      });
+
+      await query(
+        `INSERT INTO beta_chats
+         (uid, chat_id, sender_mobile, sender_name, last_message, origin, origin_instance_id, unread_count, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [
+          uid,
+          chatId,
+          cleanPhone,
+          name || cleanPhone,
+          JSON.stringify(lastMessagePayload),
+          "qr",
+          originInstanceId,
+          0,
+        ],
+      );
+
+      console.log(`✅ New QR conversation started: ${chatId}`);
+
+      const newChat = await query(
+        `SELECT * FROM beta_chats WHERE chat_id = ? LIMIT 1`,
+        [chatId],
+      );
+
+      return res.json({
+        success: true,
+        msg: "New conversation created successfully",
+        chatId,
+        data: newChat[0],
+      });
+    }
+
+    // ── Meta Cloud API channel (default) ──────────────────────────────────
     // Generate chat_id
-    const chatId = `meta_${cleanPhone}_${req.decode.uid}`;
+    const chatId = `meta_${cleanPhone}_${uid}`;
 
     // Check if chat already exists
     const existingChat = await query(
@@ -1323,7 +1417,7 @@ router.post("/start_new_conversation", validateUser, async (req, res) => {
        (uid, chat_id, sender_mobile, sender_name, last_message, origin, unread_count, createdAt, updatedAt) 
        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
-        req.decode.uid,
+        uid,
         chatId,
         cleanPhone,
         name || cleanPhone,
@@ -1423,6 +1517,52 @@ router.post("/start_conversation_with_template", validateUser, async (req, res) 
 
     console.log(`📤 Starting conversation with template: ${templateName} to ${cleanPhone}`);
 
+    // ── Resolve a media header if the template requires one ──────────────────
+    // Templates with an IMAGE / VIDEO / DOCUMENT header MUST receive a header
+    // media parameter, otherwise Meta rejects with error 132012
+    // ("expected IMAGE, received UNKNOWN"). We fetch the template definition,
+    // detect the header format, and resolve the media URL from (in order):
+    //   1) any URL the frontend passed (req.body.headerUrl)
+    //   2) uploaded media saved for this template (meta_templet_media)
+    //   3) the template's own sample media (example.header_handle[0])
+    let headerVariable = null;
+    try {
+      const fetch = require("node-fetch");
+      const tplUrl = `https://graph.facebook.com/v21.0/${metaApi.waba_id}/message_templates?name=${encodeURIComponent(templateName)}&limit=1`;
+      const tplResp = await fetch(tplUrl, {
+        headers: { Authorization: `Bearer ${metaApi.access_token}` },
+      });
+      const tplJson = await tplResp.json();
+      const tpl = tplJson?.data?.[0];
+      const headerComp = tpl?.components?.find((cmp) => cmp.type === "HEADER");
+      const headerFormat = headerComp?.format;
+
+      if (headerFormat && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerFormat)) {
+        // Uploaded media for this template (if any)
+        const media = await query(
+          `SELECT * FROM meta_templet_media WHERE templet_name = ? LIMIT 1`,
+          [templateName],
+        );
+        const uploadedUrl =
+          media.length > 0
+            ? `${process.env.FRONTENDURI || `${req.protocol}://${req.headers.host}`}/media/${media[0].file_name}`
+            : null;
+
+        const exampleHandle = headerComp?.example?.header_handle?.[0] || null;
+        const mediaUrl = req.body.headerUrl || uploadedUrl || exampleHandle;
+
+        if (mediaUrl) {
+          headerVariable = { type: headerFormat.toLowerCase(), url: mediaUrl };
+          if (headerFormat === "DOCUMENT") headerVariable.filename = "document";
+          console.log(`🖼️ Resolved ${headerFormat} header for template ${templateName}: ${mediaUrl}`);
+        } else {
+          console.warn(`⚠️ Template ${templateName} needs a ${headerFormat} header but no media could be resolved.`);
+        }
+      }
+    } catch (hdrErr) {
+      console.log("Header resolution failed (continuing without header):", hdrErr?.message);
+    }
+
     // Send template message via Meta API
     const { sendTemplateMessage } = require("../functions/function.js");
     
@@ -1434,7 +1574,7 @@ router.post("/start_conversation_with_template", validateUser, async (req, res) 
       templateLanguage || 'en', // Language
       cleanPhone, // Recipient Phone
       templateVariables || [], // Body Variables
-      null, // Header Variable
+      headerVariable, // Header Variable (media header auto-resolved)
       [] // Button Variables
     );
 
@@ -1534,6 +1674,39 @@ router.post("/start_conversation_with_template", validateUser, async (req, res) 
       msg: "Something went wrong", 
       error: err.message 
     });
+  }
+});
+
+// ─── Upload media file and return a public URL ────────────────────────────────
+// Accepts multipart form with field 'file'. Returns { success, url, filename }.
+router.post("/upload_media", validateUser, checkPlan, async (req, res) => {
+  try {
+    if (!req.files || !req.files.file) {
+      return res.json({ success: false, msg: "No file provided" });
+    }
+
+    const file = req.files.file;
+    const ext = file.name.split(".").pop()?.toLowerCase() || "bin";
+    const randomstring = require("randomstring");
+    const uniqueName = `${randomstring.generate(14)}.${ext}`;
+    const savePath = `${__dirname}/../client/public/meta-media/${uniqueName}`;
+
+    // Ensure directory exists
+    const fs = require("fs");
+    const dir = `${__dirname}/../client/public/meta-media`;
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    await file.mv(savePath);
+
+    // Build public URL — use the request's origin so it works via ngrok/production domains
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3010';
+    const publicUrl = `${protocol}://${host}/meta-media/${uniqueName}`;
+
+    res.json({ success: true, url: publicUrl, filename: file.name });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "Upload failed", err: err.message });
   }
 });
 

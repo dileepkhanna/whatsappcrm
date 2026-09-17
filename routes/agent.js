@@ -30,6 +30,7 @@ const {
   checkNote,
   checkTags,
   checkContactLimit,
+  checkAgents,
 } = require("../middlewares/plan.js");
 const { recoverEmail } = require("../emails/returnEmails.js");
 const moment = require("moment");
@@ -38,7 +39,7 @@ const ffmpegStatic = require("ffmpeg-static");
 const fs = require("fs");
 
 // adding agent
-router.post("/add_agent", validateUser, checkPlan, async (req, res) => {
+router.post("/add_agent", validateUser, checkPlan, checkAgents, async (req, res) => {
   try {
     const { name, password, email, mobile, comments } = req.body;
 
@@ -93,7 +94,7 @@ router.post("/add_agent", validateUser, checkPlan, async (req, res) => {
 });
 
 // get all agents
-router.get("/get_my_agents", validateUser, async (req, res) => {
+router.get("/get_my_agents", validateUser, checkPlan, checkAgents, async (req, res) => {
   try {
     const data = await query(`SELECT * FROM agents WHERE owner_uid = ?`, [
       req.decode.uid,
@@ -521,26 +522,26 @@ router.get("/get_my_assigned_chats", validateAgent, async (req, res) => {
       chatIds,
     });
 
-    // Using IN clause to match against multiple IDs
-    data = await query(`SELECT * FROM chats WHERE chat_id IN (?) AND uid = ?`, [
-      chatIds,
-      req.owner?.uid,
-    ]);
+    // Try beta_chats first (Meta/new inbox), fallback to legacy chats table
+    data = await query(
+      `SELECT chat_id, sender_name, sender_mobile, last_message, origin, unread_count, assigned_agent, createdAt, updatedAt
+       FROM beta_chats WHERE chat_id IN (?) AND uid = ?`,
+      [chatIds, req.owner?.uid]
+    );
 
-    console.log({
-      data,
-    });
-
-    const getContacts = await query(`SELECT * FROM contact WHERE uid = ?`, [
-      req.owner.uid,
-    ]);
-
-    if (data.length > 0 && getContacts.length > 0) {
-      data = mergeArrays(getContacts, data);
-    } else {
-      data = data;
+    // If not found in beta_chats, try legacy chats table
+    if (data.length < 1) {
+      data = await query(
+        `SELECT chat_id, sender_name, sender_mobile, last_message, origin, createdAt
+         FROM chats WHERE chat_id IN (?) AND uid = ?`,
+        [chatIds, req.owner?.uid]
+      );
     }
 
+    console.log({ data });
+
+    // beta_chats already has sender_name and sender_mobile on the row — no contact merge needed.
+    // Legacy chats table also has sender_name/sender_mobile.
     res.json({ data, success: true });
   } catch (err) {
     res.json({ success: false, msg: "something went wrong", err });
@@ -1142,14 +1143,34 @@ router.post("/send_image", validateAgent, checkPlan, async (req, res) => {
 // get my tasks
 router.get("/get_my_task", validateAgent, async (req, res) => {
   try {
+    console.log("📋 get_my_task called for agent uid:", req.decode.uid);
     const data = await query(`SELECT * FROM agent_task WHERE uid = ?`, [
       req.decode.uid,
     ]);
-
+    console.log("📋 Tasks found:", data.length, "for uid:", req.decode.uid);
     res.json({ data, success: true });
   } catch (err) {
     console.log(err);
     res.json({ err, success: false, msg: "Something went wrong" });
+  }
+});
+
+// debug: check tasks for an agent by email (no auth — remove after debugging)
+router.get("/debug_tasks/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+    const agent = await query(`SELECT * FROM agents WHERE email = ?`, [email]);
+    if (!agent[0]) return res.json({ msg: "Agent not found", email });
+    const tasks = await query(`SELECT * FROM agent_task WHERE uid = ?`, [agent[0].uid]);
+    const allTasks = await query(`SELECT * FROM agent_task ORDER BY id DESC LIMIT 20`, []);
+    res.json({
+      agent: { uid: agent[0].uid, email: agent[0].email, name: agent[0].name },
+      tasksForAgent: tasks,
+      allRecentTasks: allTasks,
+      success: true,
+    });
+  } catch (err) {
+    res.json({ err: err.toString(), success: false });
   }
 });
 
@@ -1162,10 +1183,20 @@ router.post("/mark_task_complete", validateAgent, async (req, res) => {
       return res.json({ msg: "Please type your comments." });
     }
 
-    await query(
-      `UPDATE agent_task SET status = ?, agent_comments = ? WHERE id = ?`,
-      ["COMPLETED", comment, id]
-    );
+    // First try with agent_comments column, fallback without if column missing
+    try {
+      await query(
+        `UPDATE agent_task SET status = ?, agent_comments = ? WHERE id = ?`,
+        ["COMPLETED", comment, id]
+      );
+    } catch (colErr) {
+      // Column doesn't exist yet — update only status
+      console.log("agent_comments column missing, updating status only:", colErr.message);
+      await query(
+        `UPDATE agent_task SET status = ? WHERE id = ?`,
+        ["COMPLETED", id]
+      );
+    }
 
     res.json({ msg: "Task updated", success: true });
   } catch (err) {

@@ -37,6 +37,8 @@ app.use("/api/agent", require("./routes/agent"));
 app.use("/api/qr", require("./routes/qr"));
 app.use("/api/ai", require("./routes/ai"));
 app.use("/api/webhook", require("./routes/webhook"));
+app.use("/api/webpush", require("./routes/webPush"));
+app.use("/api/ai_settings", require("./routes/aiSettings"));
 app.use("/api/wa_call", require("./routes/waCall"));
 app.use("/api/telegram", require("./routes/telegram"));
 app.use("/api/theme", require("./routes/theme"));
@@ -46,6 +48,9 @@ app.use("/api/waform", require("./routes/waform"));
 app.use("/api/whatsapp", require("./routes/whatsappFlow"));
 app.use("/api/automation", require("./routes/automation"));
 app.use("/api/advanced_templates", require("./routes/advancedTemplates")); // Carousel & Catalog templates
+// Public Chat Widget loader + config (serves /widget.js and /api/widget/config/:id).
+// Mounted at root and BEFORE the SPA catch-all so /widget.js isn't swallowed.
+app.use("/", require("./routes/widget"));
 
 // ─── Media Streaming Middleware ───────────────────────────────────────────────
 const createMediaMiddleware = (folderPath) => {
@@ -134,6 +139,54 @@ app.get("*", function (request, response) {
 const server = app.listen(process.env.PORT || 3010, () => {
   console.log(`WaCrm server is running on port ${process.env.PORT}`);
   updateLangJsonFromEnglish();
+
+  // ─── Run DB migrations for columns added after initial schema ─────────────────
+  const { query: dbQuery } = require("./database/dbpromise.js");
+  const runMigrations = async () => {
+    try {
+      // Add agent_comments column to agent_task if it doesn't exist
+      const cols = await dbQuery(`SHOW COLUMNS FROM agent_task LIKE 'agent_comments'`, []);
+      if (cols.length === 0) {
+        await dbQuery(`ALTER TABLE agent_task ADD COLUMN agent_comments text DEFAULT NULL`, []);
+        console.log("✅ Migration: added agent_comments column to agent_task");
+      }
+
+      // Add page_title column to web_public if it doesn't exist
+      const ptCols = await dbQuery(`SHOW COLUMNS FROM web_public LIKE 'page_title'`, []);
+      if (ptCols.length === 0) {
+        await dbQuery(`ALTER TABLE web_public ADD COLUMN page_title varchar(255) DEFAULT NULL`, []);
+        console.log("✅ Migration: added page_title column to web_public");
+      }
+
+      // Add favicon column to web_public if it doesn't exist (custom favicon separate from logo)
+      const favCols = await dbQuery(`SHOW COLUMNS FROM web_public LIKE 'favicon'`, []);
+      if (favCols.length === 0) {
+        await dbQuery(`ALTER TABLE web_public ADD COLUMN favicon varchar(255) DEFAULT NULL`, []);
+        console.log("✅ Migration: added favicon column to web_public");
+      }
+
+      // Add new plan permission columns if they don't exist
+      const planPermCols = [
+        "allow_wa_call",
+        "allow_webhook",
+        "allow_chat_widget",
+        "allow_agents",
+      ];
+      for (const col of planPermCols) {
+        const exists = await dbQuery(`SHOW COLUMNS FROM plan LIKE '${col}'`, []);
+        if (exists.length === 0) {
+          await dbQuery(
+            `ALTER TABLE plan ADD COLUMN ${col} tinyint(1) DEFAULT 0`,
+            [],
+          );
+          console.log(`✅ Migration: added ${col} column to plan`);
+        }
+      }
+    } catch (e) {
+      console.error("Migration error (non-fatal):", e.message);
+    }
+  };
+  runMigrations();
   
   server.setTimeout(120000);
   
@@ -153,7 +206,7 @@ const server = app.listen(process.env.PORT || 3010, () => {
   init(); // ✅ QR code initialization - ENABLED for QR WhatsApp
   
   setTimeout(() => {
-    // warmerLoopInit(); // Uncomment if using phone number warmer
+    warmerLoopInit(); // ✅ ENABLED - WhatsApp number warmer (QR devices only)
     initCampaign(); // ✅ ENABLED - Process campaigns
     // initTele(); // Uncomment if using Telegram
   }, 1000);

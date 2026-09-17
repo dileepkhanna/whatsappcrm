@@ -234,9 +234,14 @@ router.post("/update_web_config", adminValidator, async (req, res) => {
 
     let filename = "";
 
-    if (req.files) {
+    // ── Logo upload ──────────────────────────────────────────────
+    if (req.files?.file) {
       const randomString = randomstring.generate();
-      const file = req.files.file;
+      // express-fileupload can return an array if multiple files are sent
+      const file = Array.isArray(req.files.file) ? req.files.file[0] : req.files.file;
+      if (!file || !file.name) {
+        return res.json({ success: false, msg: "Invalid logo file" });
+      }
       filename = `${randomString}.${getFileExtension(file.name)}`;
 
       await new Promise((resolve, reject) => {
@@ -245,35 +250,53 @@ router.post("/update_web_config", adminValidator, async (req, res) => {
           else resolve();
         });
       });
+
+      // Auto-generate favicon.ico from logo
+      const logoFilePath = `${__dirname}/../client/public/media/${filename}`;
+      const icoFilePath  = `${__dirname}/../client/public/favicon.ico`;
+      await processImage({ sourcePath: logoFilePath, savingPath: icoFilePath, width: 64, height: 64 });
     } else {
-      filename = req.body?.logo;
+      filename = req.body?.logo || "";
+    }
+
+    // ── Separate favicon upload ──────────────────────────────────
+    // favicon_name = existing filename already in DB (no new upload)
+    let faviconFilename = req.body?.favicon_name || req.body?.favicon || "";
+    if (req.files?.favicon) {
+      const randomString = randomstring.generate();
+      const favFile = Array.isArray(req.files.favicon) ? req.files.favicon[0] : req.files.favicon;
+      if (!favFile || !favFile.name) {
+        return res.json({ success: false, msg: "Invalid favicon file" });
+      }
+      faviconFilename = `${randomString}.${getFileExtension(favFile.name)}`;
+
+      await new Promise((resolve, reject) => {
+        favFile.mv(`${__dirname}/../client/public/media/${faviconFilename}`, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+
+      // Write it as favicon.ico (overrides auto-generated one from logo)
+      const favSrcPath = `${__dirname}/../client/public/media/${faviconFilename}`;
+      const icoFilePath = `${__dirname}/../client/public/favicon.ico`;
+      await processImage({ sourcePath: favSrcPath, savingPath: icoFilePath, width: 64, height: 64 });
     }
 
     if (!app_name) {
       return res.json({ msg: "Please provide app name" });
     }
 
-    // ── Favicon (existing) ──────────────────────────────────────
-    if (filename) {
-      const logoFilePath = `${__dirname}/../client/public/media/${filename}`;
-      const icoFilePath = `${__dirname}/../client/public/favicon.ico`;
-      await processImage({
-        sourcePath: logoFilePath,
-        savingPath: icoFilePath,
-        width: 64,
-        height: 64,
-      });
-    }
-
-    // ── DB update (existing) ────────────────────────────────────
+    // ── DB update ────────────────────────────────────────────────
     await query(
-      `UPDATE web_public SET logo = ?, app_name = ?, page_title = ?, custom_home = ?,
+      `UPDATE web_public SET logo = ?, favicon = ?, app_name = ?, page_title = ?, custom_home = ?,
        is_custom_home = ?, meta_description = ?, currency_code = ?,
        currency_symbol = ?, home_page_tutorial = ?,
        chatbot_screen_tutorial = ?, broadcast_screen_tutorial = ?,
        login_header_footer = ?, exchange_rate = ?`,
       [
         filename,
+        faviconFilename,
         app_name,
         page_title || app_name,
         custom_home,
@@ -289,16 +312,15 @@ router.post("/update_web_config", adminValidator, async (req, res) => {
       ],
     );
 
-    // ── ✅ NEW: Patch index.html ─────────────────────────────────
+    // ── Patch index.html meta tags + title ───────────────────────
     try {
       patchIndexHtml({
         app_name,
         page_title: page_title || app_name,
         meta_description,
-        logo: filename, // pass null/empty if no logo change is fine too
+        logo: filename,
       });
     } catch (htmlErr) {
-      // Non-fatal — log but don't fail the request
       console.error("index.html patch failed:", htmlErr);
     }
 

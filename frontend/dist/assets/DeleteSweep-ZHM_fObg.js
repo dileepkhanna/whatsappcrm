@@ -1,0 +1,1 @@
+import{ot as e}from"./Box-BLXgjf5s.js";import{t}from"./createSvgIcon-BR_8trmA.js";var n=t((0,e().jsx)(`path`,{d:`M15 16h4v2h-4zm0-8h7v2h-7zm0 4h6v2h-6zM3 18c0 1.1.9 2 2 2h6c1.1 0 2-.9 2-2V8H3zM14 5h-3l-1-1H6L5 5H2v2h12z`}),`DeleteSweep`);export{n as t};

@@ -1435,7 +1435,9 @@ router.post("/create_manual_campaign", validateUser, async (req, res) => {
       result.meta_msg_id || null,
       result.success ? 'sent' : null,
       null, // delivery_time
-      result.error || null,
+      result.error
+        ? (typeof result.error === 'string' ? result.error : JSON.stringify(result.error))
+        : (result.msg && !result.success ? result.msg : null),
     ]);
 
     if (logValues.length > 0) {

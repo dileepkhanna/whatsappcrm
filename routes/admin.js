@@ -165,6 +165,10 @@ router.post("/add_plan", adminValidator, async (req, res) => {
       instagram_inbox,
       telegram_inbox,
       allow_wa_forms, // ✅ NEW
+      allow_wa_call,
+      allow_webhook,
+      allow_chat_widget,
+      allow_agents,
     } = req.body;
 
     if (!title || !short_description || !plan_duration_in_days) {
@@ -174,8 +178,9 @@ router.post("/add_plan", adminValidator, async (req, res) => {
     await query(
       `INSERT INTO plan (title, short_description, allow_tag, allow_note, allow_chatbot, 
         contact_limit, allow_api, is_trial, price, price_strike, plan_duration_in_days, 
-        qr_account, wa_warmer, rest_api_qr, instagram_inbox, telegram_inbox, allow_wa_forms) 
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, // ✅ 17 values
+        qr_account, wa_warmer, rest_api_qr, instagram_inbox, telegram_inbox, allow_wa_forms,
+        allow_wa_call, allow_webhook, allow_chat_widget, allow_agents) 
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, // ✅ 21 values
       [
         title,
         short_description,
@@ -194,6 +199,10 @@ router.post("/add_plan", adminValidator, async (req, res) => {
         instagram_inbox ? 1 : 0,
         telegram_inbox ? 1 : 0,
         allow_wa_forms ? 1 : 0, // ✅ NEW
+        allow_wa_call ? 1 : 0,
+        allow_webhook ? 1 : 0,
+        allow_chat_widget ? 1 : 0,
+        allow_agents ? 1 : 0,
       ],
     );
 
@@ -226,6 +235,10 @@ router.post("/update_plan_data", adminValidator, async (req, res) => {
       instagram_inbox,
       telegram_inbox,
       allow_wa_forms, // ✅ NEW
+      allow_wa_call,
+      allow_webhook,
+      allow_chat_widget,
+      allow_agents,
     } = req.body;
 
     if (!id) return res.json({ success: false, msg: "Plan ID is required" });
@@ -239,7 +252,8 @@ router.post("/update_plan_data", adminValidator, async (req, res) => {
         price = ?, price_strike = ?, plan_duration_in_days = ?,
         qr_account = ?, wa_warmer = ?, rest_api_qr = ?,
         instagram_inbox = ?, telegram_inbox = ?,
-        allow_wa_forms = ?  -- ✅ NEW
+        allow_wa_forms = ?,
+        allow_wa_call = ?, allow_webhook = ?, allow_chat_widget = ?, allow_agents = ?
        WHERE id = ?`,
       [
         title,
@@ -259,6 +273,10 @@ router.post("/update_plan_data", adminValidator, async (req, res) => {
         instagram_inbox ? 1 : 0,
         telegram_inbox ? 1 : 0,
         allow_wa_forms ? 1 : 0, // ✅ NEW
+        allow_wa_call ? 1 : 0,
+        allow_webhook ? 1 : 0,
+        allow_chat_widget ? 1 : 0,
+        allow_agents ? 1 : 0,
         id,
       ],
     );
@@ -441,6 +459,71 @@ router.post("/update_plan", adminValidator, async (req, res) => {
   } catch (err) {
     res.json({ success: false, msg: "something went wrong" });
     console.log(err);
+  }
+});
+
+// Extend a user's plan expiry by N days. Adds days to the current expiry if it
+// is still in the future, otherwise counts from now. The user must already
+// have a plan assigned. Stores plan_expire as a MySQL datetime string (matches
+// the column type and the getNumberOfDaysFromTimestamp parser).
+router.post("/extend_user_plan", adminValidator, async (req, res) => {
+  try {
+    const { uid, days } = req.body;
+    const addDays = parseInt(days);
+
+    if (!uid || !addDays || addDays < 1) {
+      return res.json({ success: false, msg: "uid and a positive days value are required" });
+    }
+
+    const [user] = await query(`SELECT plan, plan_expire FROM user WHERE uid = ?`, [uid]);
+    if (!user) {
+      return res.json({ success: false, msg: "User not found" });
+    }
+    if (!user.plan) {
+      return res.json({
+        success: false,
+        msg: "This user has no plan assigned. Assign a plan first.",
+      });
+    }
+
+    // Determine the base time to extend from.
+    const now = Date.now();
+    let baseMs = now;
+    if (user.plan_expire) {
+      const existing =
+        user.plan_expire instanceof Date
+          ? user.plan_expire.getTime()
+          : /^\d+$/.test(String(user.plan_expire).trim())
+            ? parseInt(String(user.plan_expire).trim(), 10)
+            : Date.parse(
+                String(user.plan_expire).includes("T")
+                  ? String(user.plan_expire)
+                  : String(user.plan_expire).replace(" ", "T"),
+              );
+      if (!isNaN(existing) && existing > now) {
+        baseMs = existing; // still active → extend from current expiry
+      }
+    }
+
+    const newMs = baseMs + addDays * 24 * 60 * 60 * 1000;
+    const mysqlDatetime = new Date(newMs)
+      .toISOString()
+      .slice(0, 19)
+      .replace("T", " ");
+
+    await query(`UPDATE user SET plan_expire = ? WHERE uid = ?`, [
+      mysqlDatetime,
+      uid,
+    ]);
+
+    res.json({
+      success: true,
+      msg: `Plan extended by ${addDays} day(s)`,
+      plan_expire: mysqlDatetime,
+    });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong" });
   }
 });
 
@@ -1105,7 +1188,7 @@ router.get("/get_dashboard_for_user", adminValidator, async (req, res) => {
         SELECT 
           MONTH(createdAt) as month, 
           COUNT(*) as count,
-          JSON_EXTRACT(plan, '$.is_trial') as is_trial
+          MAX(JSON_EXTRACT(plan, '$.is_trial')) as is_trial
         FROM user 
         GROUP BY MONTH(createdAt)
       `),
@@ -1204,30 +1287,40 @@ router.get("/get_dashboard_for_user", adminValidator, async (req, res) => {
       : [0, 0, 0, 0, 0, 0, 0];
 
     const agentPerformance = agents.slice(0, 3).map((agent) => {
-      const agentTasks = agentTasks.filter((task) => task.uid === agent.uid);
-      const completedTasks = agentTasks.filter(
+      const thisAgentTasks = agentTasks.filter((task) => task.uid === agent.uid);
+      const completedTasks = thisAgentTasks.filter(
         (task) => task.status === "COMPLETED",
       ).length;
       const completionRate =
-        agentTasks.length > 0 ? (completedTasks / agentTasks.length) * 100 : 0;
+        thisAgentTasks.length > 0
+          ? (completedTasks / thisAgentTasks.length) * 100
+          : 0;
 
       return {
         name: agent.name,
         data: [
-          Math.floor(Math.random() * 30) + 70,
-          completionRate || Math.floor(Math.random() * 20) + 75,
-          Math.floor(Math.random() * 15) + 80,
-          Math.floor(Math.random() * 25) + 70,
-          Math.floor(Math.random() * 20) + 75,
+          thisAgentTasks.length,
+          completedTasks,
+          completionRate,
         ],
       };
     });
+
+    const safeParsePlanTitle = (plan) => {
+      if (!plan) return "No Plan";
+      try {
+        const parsed = typeof plan === "string" ? JSON.parse(plan) : plan;
+        return parsed?.title || "No Plan";
+      } catch {
+        return "No Plan";
+      }
+    };
 
     const recentUsersData = recentUsers.map((user) => ({
       id: user.id,
       name: user.name,
       email: user.email,
-      plan: user.plan ? JSON.parse(user.plan).title || "No Plan" : "No Plan",
+      plan: safeParsePlanTitle(user.plan),
       date: new Date(user.createdAt).toISOString().split("T")[0],
     }));
 
@@ -1236,18 +1329,56 @@ router.get("/get_dashboard_for_user", adminValidator, async (req, res) => {
       return {
         id: order.id,
         user,
-        amount: `$${order.amount}`,
+        amount: `₹${order.amount}`,
         plan: "Subscription",
         status: "Completed",
         date: new Date(order.createdAt).toISOString().split("T")[0],
       };
     });
 
+    // Real system metrics from the host machine.
+    const os = require("os");
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const memoryUsage = Math.round(((totalMem - freeMem) / totalMem) * 100);
+
+    // Load average (1 min) as a percentage of available CPU cores.
+    const cpuCount = os.cpus().length || 1;
+    const loadAvg1 = os.loadavg()[0]; // 0 on Windows — fall back to process CPU
+    const serverLoad =
+      loadAvg1 > 0
+        ? Math.min(100, Math.round((loadAvg1 / cpuCount) * 100))
+        : Math.min(
+            100,
+            Math.round(
+              (process.memoryUsage().rss / totalMem) * 100,
+            ),
+          );
+
+    // Count live socket connections as active sessions if available.
+    let activeSessions = 0;
+    try {
+      const { getSocketIo } = require("../socket");
+      const io = typeof getSocketIo === "function" ? getSocketIo() : null;
+      activeSessions = io ? io.sockets.sockets.size : 0;
+    } catch {
+      activeSessions = 0;
+    }
+
     const systemMetrics = {
-      serverLoad: Math.floor(Math.random() * 60) + 20,
-      memoryUsage: Math.floor(Math.random() * 40) + 30,
-      diskSpace: Math.floor(Math.random() * 30) + 10,
-      activeSessions: totalUsers[0]?.count > 0 ? Math.floor(totalUsers[0].count * 0.7) : 0,
+      serverLoad,
+      memoryUsage,
+      // Disk usage isn't reliably available cross-platform without extra deps;
+      // report process heap usage as a lightweight proxy instead.
+      diskSpace: Math.min(
+        100,
+        Math.round(
+          (process.memoryUsage().heapUsed /
+            process.memoryUsage().heapTotal) *
+            100,
+        ),
+      ),
+      activeSessions,
     };
 
     res.json({
@@ -1966,6 +2097,157 @@ router.post("/update_fcm_data", adminValidator, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.json({ msg: "Something went wrong", success: false });
+  }
+});
+
+// ─── Test FCM configuration ──────────────────────────────────────────────────
+router.post("/test_fcm_config", adminValidator, async (req, res) => {
+  const checks = {
+    db_config:       { ok: false, msg: "" },
+    credentials:     { ok: false, msg: "" },
+    firebase_init:   { ok: false, msg: "" },
+    send_test:       { ok: false, msg: "" },
+    subscribers:     { ok: false, msg: "", count: 0 },
+  };
+
+  try {
+    // ── 1. Read config from DB ──────────────────────────────────────────────
+    const [cfg] = await query(
+      `SELECT fcm_apiKey, fcm_projectId, fcm_messagingSenderId, fcm_appId,
+              fcm_vapidKey, fcm_clientEmail, fcm_privateKey FROM web_private`,
+      []
+    );
+
+    if (!cfg) {
+      checks.db_config.msg = "No web_private row found in database.";
+      return res.json({ success: false, checks });
+    }
+
+    const missing = [];
+    if (!cfg.fcm_apiKey)            missing.push("API Key");
+    if (!cfg.fcm_projectId)         missing.push("Project ID");
+    if (!cfg.fcm_messagingSenderId) missing.push("Messaging Sender ID");
+    if (!cfg.fcm_appId)             missing.push("App ID");
+    if (!cfg.fcm_vapidKey)          missing.push("VAPID Key");
+    if (!cfg.fcm_clientEmail)       missing.push("Client Email");
+    if (!cfg.fcm_privateKey)        missing.push("Private Key");
+
+    if (missing.length > 0) {
+      checks.db_config.ok  = false;
+      checks.db_config.msg = `Missing fields: ${missing.join(", ")}`;
+      return res.json({ success: false, checks });
+    }
+
+    checks.db_config.ok  = true;
+    checks.db_config.msg = "All config fields present in database.";
+
+    // ── 2. Validate credential format ──────────────────────────────────────
+    const emailOk = /^.+@.+\.iam\.gserviceaccount\.com$/.test(cfg.fcm_clientEmail);
+    const keyOk   = cfg.fcm_privateKey.includes("BEGIN PRIVATE KEY") ||
+                    cfg.fcm_privateKey.includes("BEGIN RSA PRIVATE KEY");
+    const vapidOk = cfg.fcm_vapidKey.length > 30;
+
+    if (!emailOk) {
+      checks.credentials.msg = "Client email format looks wrong — expected format: xxx@xxx.iam.gserviceaccount.com";
+      return res.json({ success: false, checks });
+    }
+    if (!keyOk) {
+      checks.credentials.msg = "Private key format looks wrong — should start with -----BEGIN PRIVATE KEY-----";
+      return res.json({ success: false, checks });
+    }
+    if (!vapidOk) {
+      checks.credentials.msg = "VAPID key looks too short — copy the full key from Firebase Console → Cloud Messaging.";
+      return res.json({ success: false, checks });
+    }
+    checks.credentials.ok  = true;
+    checks.credentials.msg = "Credential formats look valid.";
+
+    // ── 3. Initialize the named Firebase app ───────────────────────────────
+    const admin = require("firebase-admin");
+    const TEST_APP_NAME = "web-fcm-test";
+
+    let testApp;
+    try {
+      const privateKey = cfg.fcm_privateKey.replace(/\\n/g, "\n").trim();
+      const existing   = admin.apps.find((a) => a && a.name === TEST_APP_NAME);
+      if (existing) {
+        try { await existing.delete(); } catch (_) {}
+      }
+      testApp = admin.initializeApp(
+        {
+          credential: admin.credential.cert({
+            projectId:   cfg.fcm_projectId,
+            clientEmail: cfg.fcm_clientEmail,
+            privateKey,
+          }),
+        },
+        TEST_APP_NAME
+      );
+      checks.firebase_init.ok  = true;
+      checks.firebase_init.msg = `Firebase app initialized for project "${cfg.fcm_projectId}".`;
+    } catch (initErr) {
+      checks.firebase_init.msg = `Firebase init failed: ${initErr.message}`;
+      return res.json({ success: false, checks });
+    }
+
+    // ── 4. Dry-run send to verify credentials ──────────────────────────────
+    // We send to a known-invalid token — Firebase rejects with
+    // "registration-token-not-registered" which proves auth worked.
+    // Any auth error (403 / invalid credential) is a real failure.
+    try {
+      await admin.messaging(testApp).send({
+        token: "test-token-diagnostic-probe",
+        notification: { title: "FCM Config Test", body: "Credential check" },
+      });
+      // If it somehow succeeds (shouldn't with a fake token):
+      checks.send_test.ok  = true;
+      checks.send_test.msg = "Send succeeded (unexpected with test token — credentials are valid).";
+    } catch (sendErr) {
+      const code = sendErr.code || sendErr.message || "";
+      if (
+        code.includes("registration-token-not-registered") ||
+        code.includes("invalid-registration-token") ||
+        code.includes("invalid-argument")
+      ) {
+        // Expected — bad token but credentials authenticated successfully.
+        checks.send_test.ok  = true;
+        checks.send_test.msg = "Firebase credentials authenticated successfully (test token rejected as expected).";
+      } else if (
+        code.includes("invalid-credential") ||
+        code.includes("auth/") ||
+        code.includes("403")
+      ) {
+        checks.send_test.msg = `Authentication failed — check Client Email / Private Key. Error: ${sendErr.message}`;
+        return res.json({ success: false, checks });
+      } else {
+        checks.send_test.msg = `Send test error: ${sendErr.message}`;
+        return res.json({ success: false, checks });
+      }
+    } finally {
+      try { await testApp.delete(); } catch (_) {}
+    }
+
+    // ── 5. Subscriber count ────────────────────────────────────────────────
+    const subs = await query(`SELECT COUNT(*) AS cnt FROM fcm_tokens`, []);
+    const subCount = Number(subs[0]?.cnt || 0);
+    checks.subscribers.ok    = true;
+    checks.subscribers.count = subCount;
+    checks.subscribers.msg   = subCount > 0
+      ? `${subCount} device(s) subscribed and ready to receive notifications.`
+      : "No subscribers yet. Users need to open the app (over HTTPS/ngrok) and grant notification permission.";
+
+    return res.json({
+      success: true,
+      msg: "Firebase configuration is valid and working.",
+      checks,
+    });
+  } catch (err) {
+    console.error("test_fcm_config error:", err);
+    return res.json({
+      success: false,
+      msg: err.message || "Unexpected error during FCM config test.",
+      checks,
+    });
   }
 });
 

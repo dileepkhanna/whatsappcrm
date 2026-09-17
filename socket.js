@@ -74,37 +74,54 @@ function initializeSocket(server) {
     try {
       const { uid, role } = socket.decodedToken;
       const isAgent = role === "agent";
+      const isAdmin = role === "admin";
 
-      // console.log(`New connection attempt from UID: ${uid}`);
+      // Admins use the socket for real-time admin features but don't have
+      // a row in the user table — just acknowledge and skip user lookup.
+      if (isAdmin) {
+        socket.userData = {
+          uid,
+          role: "admin",
+          socketId: socket.id,
+          isAgent: false,
+          isAdmin: true,
+          connectedAt: new Date(),
+        };
+        socket.emit("connection_ack", {
+          status: "success",
+          socketId: socket.id,
+          userData: { uid, role: "admin" },
+        });
+      } else {
+        const userData = isAgent
+          ? await getAgentData(uid)
+          : await getUserData(uid);
 
-      const userData = isAgent
-        ? await getAgentData(uid)
-        : await getUserData(uid);
+        if (!userData) {
+          throw new Error("User data not found");
+        }
 
-      if (!userData) {
-        throw new Error("User data not found");
-      }
-
-      // Store user data on socket
-      socket.userData = {
-        ...userData,
-        socketId: socket.id,
-        isAgent,
-        connectedAt: new Date(),
-      };
-
-      // Success response
-      socket.emit("connection_ack", {
-        status: "success",
-        socketId: socket.id,
-        userData: {
-          uid: userData.uid,
-          name: userData.name,
-          email: userData.email,
+        // Store user data on socket
+        socket.userData = {
+          ...userData,
+          socketId: socket.id,
           isAgent,
-          ...(isAgent && { owner: userData.owner_uid }),
-        },
-      });
+          connectedAt: new Date(),
+        };
+
+        // Success response
+        socket.emit("connection_ack", {
+          status: "success",
+          socketId: socket.id,
+          userData: {
+            uid: userData.uid,
+            name: userData.name,
+            email: userData.email,
+            isAgent,
+            ...(isAgent && { owner: userData.owner_uid }),
+          },
+        });
+      }
 
       // console.log({
       //   msg: "Socket established",

@@ -1,0 +1,20 @@
+[
+  {
+    "type": "text",
+    "metaChatId": "wamid.HBgMOTE5OTQ5NTEyMjYyFQIAERgSRDk3QzRCQTI4QTczODhEMDI3AA==",
+    "msgContext": {
+      "type": "text",
+      "text": {
+        "preview_url": true,
+        "body": "hi"
+      }
+    },
+    "reaction": "",
+    "timestamp": 1789558686,
+    "senderName": "9949512262",
+    "senderMobile": "9949512262",
+    "status": "sent",
+    "star": false,
+    "route": "OUTGOING"
+  }
+]

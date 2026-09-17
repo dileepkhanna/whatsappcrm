@@ -10,10 +10,8 @@ const { init, cleanup } = require("./helper/addon/qr");
 const { warmerLoopInit } = require("./helper/addon/qr/warmer/index.js");
 const { initTele, cleanupTele } = require("./helper/addon/telegram/tele.js");
 const { updateLangJsonFromEnglish } = require("./utils/fun.js");
-
 const app = express();
 const currentDir = process.cwd();
-
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
@@ -35,12 +33,16 @@ app.use("/api/agent", require("./routes/agent"));
 app.use("/api/qr", require("./routes/qr"));
 app.use("/api/ai", require("./routes/ai"));
 app.use("/api/webhook", require("./routes/webhook"));
+app.use("/api/webpush", require("./routes/webPush"));
+app.use("/api/ai_settings", require("./routes/aiSettings"));
 app.use("/api/wa_call", require("./routes/waCall"));
 app.use("/api/telegram", require("./routes/telegram"));
 app.use("/api/theme", require("./routes/theme"));
 app.use("/api/insta", require("./routes/insta"));
 app.use("/api/kaban", require("./routes/kaban"));
 app.use("/api/waform", require("./routes/waform"));
+// Public Chat Widget loader + config (serves /widget.js and /api/widget/config/:id).
+app.use("/", require("./routes/widget"));
 
 // ─── Media Streaming Middleware ───────────────────────────────────────────────
 const createMediaMiddleware = (folderPath) => {
@@ -109,7 +111,7 @@ const server = app.listen(process.env.PORT || 3010, () => {
   init(); // ✅ QR code initialization - ENABLED for QR WhatsApp
   
   setTimeout(() => {
-    // warmerLoopInit(); // Uncomment if using phone number warmer
+    warmerLoopInit(); // ✅ ENABLED - WhatsApp number warmer (QR devices only)
     initCampaign(); // ✅ ENABLED - Process campaigns
     // initTele(); // Uncomment if using Telegram
   }, 1000);

@@ -588,9 +588,9 @@ function replaceVariables(input, variables = {}) {
   if (input === null || input === undefined) return input;
 
   if (typeof input === "string") {
-    return input.replace(/\{\{\{([^{}]+)\}\}\}/g, (match, expression) => {
+    // Step 1: replace triple-brace {{{var}}} (legacy JS-expression format)
+    let result = input.replace(/\{\{\{([^{}]+)\}\}\}/g, (match, expression) => {
       try {
-        // Check if it's a plain path like items[0].name
         const plainPath = expression.match(/^([a-zA-Z0-9_$\[\]\.]+)$/);
         if (plainPath) {
           const parts = expression.split(/[\.\[\]]/).filter(Boolean);
@@ -607,7 +607,6 @@ function replaceVariables(input, variables = {}) {
           }
           return value !== undefined ? value : match;
         } else {
-          // Evaluate full JS expression
           const func = new Function(
             ...Object.keys(variables),
             `return ${expression}`,
@@ -615,9 +614,19 @@ function replaceVariables(input, variables = {}) {
           return func(...Object.values(variables));
         }
       } catch (e) {
-        return match; // Fallback to original if error
+        return match;
       }
     });
+
+    // Step 2: replace double-brace {{var}} (AI-generated / user-facing format)
+    result = result.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (match, varName) => {
+      if (varName in variables && variables[varName] !== undefined && variables[varName] !== null) {
+        return variables[varName];
+      }
+      return match; // leave unreplaced if not found
+    });
+
+    return result;
   }
 
   if (Array.isArray(input)) {
@@ -720,10 +729,12 @@ async function sendWaMessage({
     // ✅ Handle beta flow format: node.data.message instead of node.data.content
     if (!messageContent && node?.data?.message) {
       console.log("🔄 Converting beta flow message format to standard format");
+      // Replace {{var}} and {{{var}}} variables before building the content object
+      const resolvedText = replaceVariables(node.data.message, variablesObj || {});
       messageContent = {
         type: "text",
         text: {
-          body: node.data.message,
+          body: resolvedText,
           preview_url: false,
         },
       };
@@ -1207,6 +1218,7 @@ async function processSendMessage({
       sessionId,
       isGroup: false,
       uid,
+      variablesObj, // ✅ pass variables so {{userName}} etc. get replaced
     });
 
     const userTimezone = getCurrentTimestampInTimeZone(
@@ -1219,10 +1231,12 @@ async function processSendMessage({
       
       // Beta flows store message in node.data.message - convert to proper msgContext format
       if (!msgContext && node?.data?.message) {
+        // Replace variables so the stored/echoed conversation copy is resolved too
+        const resolvedMsgText = replaceVariables(node.data.message, variablesObj || {});
         msgContext = {
           type: "text",
           text: {
-            body: node.data.message,
+            body: resolvedMsgText,
             preview_url: false,
           },
         };
@@ -1271,14 +1285,25 @@ async function processSendMessage({
             message?.senderMobile,
           ],
         );
-        
+
+        // If the next node is a Response Saver, this message was a QUESTION.
+        // Stop and WAIT for the user's reply — do NOT auto-continue, otherwise
+        // the responseSaver would run before the user answers and save nothing.
+        if (n.type === "responseSaver" || n.type === "RESPONSE_SAVER") {
+          console.log("📤 Question sent, waiting for user reply before saving:", {
+            currentNode: node.id,
+            nextNode: n.id,
+          });
+          return { moveToNextNode: false };
+        }
+
         console.log("📤 Message sent successfully, moving to next node:", {
           currentNode: node.id,
           nextNode: n.id,
           nextNodeType: n.type,
         });
-        
-        return { moveToNextNode: true }; // ✅ Always move to next node after sending message
+
+        return { moveToNextNode: true }; // continue to non-input nodes
       } else {
         console.log("⚠️ No next node found after message send");
         return {};
@@ -1319,53 +1344,80 @@ async function processCondition({
       incomingText = incomingTextOld;
     }
 
-    const getCondition = matchCondition(
-      node?.data?.conditions || [],
-      incomingText,
+    // Resolve any {{variable}} references in the text being compared
+    const textToCheck = replaceVariables(
+      String(incomingText ?? ""),
+      variablesObj || {},
     );
 
-    if (getCondition) {
-      const e =
-        edges?.find((e) => e.sourceHandle === getCondition?.targetNodeId) || {};
-      const n = nodes?.find((n) => n.id === e?.target);
-      if (n) {
-        const oldData = flowSession?.data;
-        const newData = { ...oldData, node: n };
-        await query(
-          `UPDATE flow_session SET data = ? WHERE flow_id = ? AND uid = ? AND sender_mobile = ?`,
-          [
-            JSON.stringify(newData),
-            element?.flow_id,
-            uid,
-            message?.senderMobile,
-          ],
-        );
+    // Helper: move the session pointer to a target node and persist it
+    const goToNode = async (targetNode) => {
+      if (!targetNode) return;
+      const oldData = flowSession?.data;
+      const newData = { ...oldData, node: targetNode };
+      await query(
+        `UPDATE flow_session SET data = ? WHERE flow_id = ? AND uid = ? AND sender_mobile = ?`,
+        [JSON.stringify(newData), element?.flow_id, uid, message?.senderMobile],
+      );
+    };
+
+    // ── Detect condition format ──────────────────────────────────────────────
+    const legacyConditions = node?.data?.conditions || [];
+
+    let matched = false;
+    let matchTargetNode = null;
+
+    if (legacyConditions.length > 0) {
+      // LEGACY format: conditions[] array + targetNodeId + "default" handle
+      const getCondition = matchCondition(legacyConditions, textToCheck);
+      if (getCondition) {
+        const e = edges?.find((e) => e.sourceHandle === getCondition?.targetNodeId) || {};
+        matchTargetNode = nodes?.find((n) => n.id === e?.target);
+        matched = !!matchTargetNode;
+      }
+      if (!matched) {
+        const e = edges?.find((e) => e.source === node?.id && e.sourceHandle === "default") || {};
+        matchTargetNode = nodes?.find((n) => n.id === e?.target);
       }
     } else {
-      // process default condition if not matched
-      const e =
-        edges?.find(
-          (e) => e.source === node?.id && e.sourceHandle === "default",
-        ) || {};
-      const n = nodes?.find((n) => n.id === e?.target);
-      if (n) {
-        const oldData = flowSession?.data;
-        const newData = { ...oldData, node: n };
-        await query(
-          `UPDATE flow_session SET data = ? WHERE flow_id = ? AND uid = ? AND sender_mobile = ?`,
-          [
-            JSON.stringify(newData),
-            element?.flow_id,
-            uid,
-            message?.senderMobile,
-          ],
-        );
+      // AI-GENERATED format: data.conditionValue + data.matchType, handles "a"/"b"
+      const rawValue = node?.data?.conditionValue ?? node?.data?.value ?? "";
+      const matchType = String(node?.data?.matchType || "Contains").toLowerCase();
+      const cmpVal = replaceVariables(String(rawValue), variablesObj || {}).toLowerCase();
+      const cmpText = textToCheck.toLowerCase();
+
+      if (cmpVal) {
+        if (matchType.includes("exact")) matched = cmpText === cmpVal;
+        else if (matchType.includes("start")) matched = cmpText.startsWith(cmpVal);
+        else if (matchType.includes("end")) matched = cmpText.endsWith(cmpVal);
+        else matched = cmpText.includes(cmpVal); // default: contains
       }
+
+      // Match path = handle "a", default/else path = handle "b"
+      const matchEdge = edges?.find((e) => e.source === node?.id && e.sourceHandle === "a");
+      const defaultEdge =
+        edges?.find((e) => e.source === node?.id && e.sourceHandle === "b") ||
+        edges?.find((e) => e.source === node?.id && e.sourceHandle === "default") ||
+        edges?.find((e) => e.source === node?.id && !e.sourceHandle); // any remaining edge
+
+      const chosenEdge = matched ? matchEdge : defaultEdge;
+      matchTargetNode = nodes?.find((n) => n.id === chosenEdge?.target);
     }
 
-    return { moveToNextNode: node?.data?.moveToNextNode };
+    console.log("🔀 Condition evaluated:", {
+      nodeId: node?.id,
+      textToCheck,
+      matched,
+      nextNode: matchTargetNode?.id || "none",
+    });
+
+    await goToNode(matchTargetNode);
+
+    // A condition always continues immediately to the branch target.
+    // If no target was found, stop to avoid an infinite loop.
+    return { moveToNextNode: !!matchTargetNode };
   } catch (err) {
-    console.log(err);
+    console.log("❌ Error in processCondition:", err);
     return {};
   }
 }
@@ -1386,9 +1438,31 @@ async function processResponseSaver({
 }) {
   try {
     const { uid } = user;
-    const newVars = node?.data?.variables || [];
-    const convertVar = setVariables(newVars, { message });
-    const savingVars = { ...(variablesObj || {}), ...(convertVar || {}) };
+
+    // Support two data formats:
+    // 1. Legacy format: node.data.variables = [{ varName, responsePath }]
+    // 2. AI-generated format: node.data.variableName = "userName"
+    let savingVars = { ...(variablesObj || {}) };
+
+    const legacyVars = node?.data?.variables || [];
+    if (legacyVars.length > 0) {
+      // Legacy path — uses responsePath to extract from message object
+      const convertVar = setVariables(legacyVars, { message });
+      savingVars = { ...savingVars, ...(convertVar || {}) };
+    } else if (node?.data?.variableName) {
+      // AI-generated path — save the raw incoming text as the named variable
+      const varName = node.data.variableName.trim();
+      if (varName) {
+        const savedValue =
+          incomingTextOld ||
+          message?.text?.body ||
+          message?.senderMessage ||
+          message?.body ||
+          "";
+        savingVars[varName] = savedValue;
+        console.log(`💾 Saved variable {{${varName}}} = "${savedValue}"`);
+      }
+    }
 
     const e = edges.find((e) => e.source === node.id);
     if (!e) return {};
@@ -1407,7 +1481,13 @@ async function processResponseSaver({
       [JSON.stringify(newData), element?.flow_id, uid, message?.senderMobile],
     );
 
-    return { moveToNextNode: node?.data?.moveToNextNode || false };
+    // Response Saver never waits for input — it saves the reply that was already
+    // received, then immediately continues to the next node. Default to true.
+    const shouldContinue =
+      node?.data?.moveToNextNode !== undefined
+        ? node.data.moveToNextNode
+        : true;
+    return { moveToNextNode: shouldContinue };
   } catch (err) {
     console.error("Error in processResponseSaver:", err);
     return {};

@@ -36,6 +36,8 @@ const {
   checkTags,
   checkContactLimit,
   checkWaWArmer,
+  checkChatWidget,
+  resolveEffectivePlan,
 } = require("../middlewares/plan.js");
 const { recoverEmail } = require("../emails/returnEmails.js");
 const moment = require("moment");
@@ -647,8 +649,22 @@ router.get("/get_me", validateUser, async (req, res) => {
       ]);
     }
 
+    const userRow = { ...data[0], contact: contact.length };
+
+    // Return the LIVE plan (current flags from the plan table) instead of the
+    // frozen snapshot, so admin permission changes apply to existing users.
+    if (userRow.plan) {
+      const livePlan = await resolveEffectivePlan(userRow.plan);
+      if (livePlan) {
+        userRow.plan =
+          typeof userRow.plan === "string"
+            ? JSON.stringify(livePlan)
+            : livePlan;
+      }
+    }
+
     res.json({
-      data: { ...data[0], contact: contact.length },
+      data: userRow,
       success: true,
       addon: finalAddon,
     });
@@ -1453,9 +1469,16 @@ router.get("/chats/:chatId/messages", validateUser, async (req, res) => {
     const { chatId } = req.params;
     const { limit = 50, offset = 0 } = req.query;
     
-    // Get chat info
+    // Get chat info — alias columns to match the /chats list endpoint shape
+    // (frontend header + ContactInfo read contact_name / contact_phone / profile_pic).
     const [chatInfo] = await query(
-      `SELECT * FROM beta_chats WHERE chat_id = ? AND uid = ?`,
+      `SELECT
+        bc.*,
+        bc.sender_name   AS contact_name,
+        bc.sender_mobile AS contact_phone,
+        bc.profile       AS profile_pic,
+        bc.updatedAt     AS last_message_time
+      FROM beta_chats bc WHERE bc.chat_id = ? AND bc.uid = ?`,
       [chatId, req.decode.uid]
     );
     
@@ -1471,6 +1494,7 @@ router.get("/chats/:chatId/messages", validateUser, async (req, res) => {
         chat_id,
         status,
         sentBy,
+        route,
         msgContext,
         reaction,
         timestamp,
@@ -2493,6 +2517,42 @@ router.post("/start_free_trial", validateUser, async (req, res) => {
   }
 });
 
+// Renew / activate a FREE plan (price 0). Unlike start_free_trial this is not
+// one-time, so users can re-activate a free plan after it expires. Paid plans
+// must still go through the payment endpoints.
+router.post("/renew_free_plan", validateUser, async (req, res) => {
+  try {
+    const { planId } = req.body;
+    if (!planId) {
+      return res.json({ success: false, msg: "planId is required" });
+    }
+
+    const [plan] = await query(`SELECT * FROM plan WHERE id = ?`, [planId]);
+    if (!plan) {
+      return res.json({ success: false, msg: "Invalid plan found" });
+    }
+
+    if (parseFloat(plan.price) > 0) {
+      return res.json({
+        success: false,
+        msg: "This is a paid plan. Please complete payment to activate it.",
+      });
+    }
+
+    await updateUserPlan(plan, req.decode.uid);
+
+    await query(
+      `INSERT INTO orders (uid, payment_mode, amount, data) VALUES (?,?,?,?)`,
+      [req.decode.uid, "OFFLINE", 0, JSON.stringify({ plan, renew: true })],
+    );
+
+    res.json({ success: true, msg: "Plan activated successfully" });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "Something went wrong", err });
+  }
+});
+
 // send recover
 router.post("/send_resovery", async (req, res) => {
   try {
@@ -2615,8 +2675,16 @@ router.get("/modify_password", validateUser, async (req, res) => {
       return res.json({ success: false, msg: "Please provide a password" });
     }
 
-    if (moment(req.decode.time).diff(moment(new Date()), "hours") > 1) {
-      return res.json({ success: false, msg: "Token expired" });
+    // Reject links older than 1 hour. req.decode.time is when the token was
+    // issued; compare NOW - issued. (The previous check subtracted in the wrong
+    // order, so it was always negative and the link never actually expired.)
+    const issuedAt = moment(req.decode.time);
+    const hoursElapsed = moment().diff(issuedAt, "hours", true);
+    if (!issuedAt.isValid() || hoursElapsed > 1) {
+      return res.json({
+        success: false,
+        msg: "This reset link has expired. Please request a new one.",
+      });
     }
 
     const hashpassword = await bcrypt.hash(pass, 10);
@@ -2689,10 +2757,11 @@ router.get("/fetch_profile", validateUser, async (req, res) => {
 router.post("/add_task_for_agent", validateUser, async (req, res) => {
   try {
     const { title, des, agent_uid } = req.body;
+    console.log("📌 add_task_for_agent:", { title, des, agent_uid, owner: req.decode.uid });
+
     if (!title || !des) {
       return res.json({ msg: "Please give title and description" });
     }
-
     if (!agent_uid) {
       return res.json({ msg: "Please select an agent" });
     }
@@ -2702,10 +2771,29 @@ router.post("/add_task_for_agent", validateUser, async (req, res) => {
       [req.decode.uid, agent_uid, title, des, "PENDING"],
     );
 
+    console.log("✅ Task inserted for agent_uid:", agent_uid, "owner:", req.decode.uid);
     res.json({ success: true, msg: "Task was added" });
   } catch (err) {
     console.log(err);
     res.json({ msg: "something went wrong", err });
+  }
+});
+
+// debug: list all tasks in system (temporary)
+router.get("/debug_all_tasks", validateUser, async (req, res) => {
+  try {
+    const tasks = await query(
+      `SELECT at.*, a.email AS agent_email, a.uid AS agent_uid 
+       FROM agent_task at 
+       LEFT JOIN agents a ON a.uid = at.uid 
+       WHERE at.owner_uid = ? 
+       ORDER BY at.id DESC LIMIT 50`,
+      [req.decode.uid]
+    );
+    const agents = await query(`SELECT uid, email, name FROM agents WHERE owner_uid = ?`, [req.decode.uid]);
+    res.json({ tasks, agents, owner: req.decode.uid, success: true });
+  } catch (err) {
+    res.json({ err: err.toString(), success: false });
   }
 });
 
@@ -2746,7 +2834,7 @@ router.post("/del_task_for_agent", validateUser, async (req, res) => {
 });
 
 // add widget
-router.post("/add_widget", validateUser, async (req, res) => {
+router.post("/add_widget", validateUser, checkPlan, checkChatWidget, async (req, res) => {
   try {
     const { title, whatsapp_number, place, selectedIcon, logoType, size } =
       req.body;
@@ -2803,7 +2891,7 @@ router.post("/add_widget", validateUser, async (req, res) => {
 });
 
 // get my widget
-router.get("/get_my_widget", validateUser, async (req, res) => {
+router.get("/get_my_widget", validateUser, checkPlan, checkChatWidget, async (req, res) => {
   try {
     const data = await query(`SELECT * FROM chat_widget WHERE uid = ?`, [
       req.decode.uid,
@@ -2817,7 +2905,7 @@ router.get("/get_my_widget", validateUser, async (req, res) => {
 });
 
 // del widget
-router.post("/del_widget", validateUser, async (req, res) => {
+router.post("/del_widget", validateUser, checkPlan, checkChatWidget, async (req, res) => {
   try {
     const { id } = req.body;
 
@@ -2978,36 +3066,60 @@ router.post(
   checkWaWArmer,
   async (req, res) => {
     try {
+      const uid = req.decode.uid;
       const { instance } = req.body;
 
-      const getWarm = await query(`SELECT * FROM warmers WHERE uid = ?`, [
-        req.decode.uid,
-      ]);
-
-      const addedIns = JSON.parse(getWarm[0]?.instances);
-
-      if (addedIns.includes(instance)) {
-        const finalIns = addedIns.filter((i) => i !== instance);
-
-        await query(`UPDATE warmers SET instances = ? WHERE uid = ?`, [
-          JSON.stringify(finalIns),
-          req.decode.uid,
-        ]);
-      } else {
-        const fiIns = [...addedIns, instance];
-        await query(`UPDATE warmers SET instances = ? WHERE uid = ?`, [
-          JSON.stringify(fiIns),
-          req.decode.uid,
-        ]);
+      if (!instance) {
+        return res.json({ success: false, msg: "instance is required" });
       }
 
+      // The instance must belong to this user (prevents adding someone else's).
+      const owned = await query(
+        `SELECT uniqueId FROM instance WHERE uniqueId = ? AND uid = ? LIMIT 1`,
+        [instance, uid],
+      );
+      if (owned.length < 1) {
+        return res.json({ success: false, msg: "Device not found" });
+      }
+
+      // Ensure a warmers row exists for this user.
+      let getWarm = await query(`SELECT * FROM warmers WHERE uid = ?`, [uid]);
+      if (getWarm.length < 1) {
+        await query(
+          `INSERT INTO warmers (uid, instances, is_active) VALUES (?,?,?)`,
+          [uid, JSON.stringify([]), 1],
+        );
+        getWarm = await query(`SELECT * FROM warmers WHERE uid = ?`, [uid]);
+      }
+
+      let addedIns = [];
+      try {
+        addedIns = JSON.parse(getWarm[0]?.instances || "[]");
+        if (!Array.isArray(addedIns)) addedIns = [];
+      } catch {
+        addedIns = [];
+      }
+
+      // Toggle membership: add if absent, remove if present.
+      const finalIns = addedIns.includes(instance)
+        ? addedIns.filter((i) => i !== instance)
+        : [...addedIns, instance];
+
+      await query(`UPDATE warmers SET instances = ? WHERE uid = ?`, [
+        JSON.stringify(finalIns),
+        uid,
+      ]);
+
       res.json({
-        msg: "Warmer updated",
+        msg: addedIns.includes(instance)
+          ? "Device removed from warmer"
+          : "Device added to warmer",
         success: true,
+        instances: finalIns,
       });
     } catch (err) {
       console.log(err);
-      res.json({ msg: "something went wrong", err });
+      res.json({ success: false, msg: "something went wrong", err });
     }
   },
 );
@@ -3698,6 +3810,7 @@ router.post("/send_template_message", validateUser, async (req, res) => {
     // 🔍 Auto-detect if this is a carousel or catalog template
     let templateType = "STANDARD";
     let templateStructure = null;
+    let templateFetchFailed = false; // true when we couldn't reach Meta at all
     let response;
     
     try {
@@ -3707,6 +3820,13 @@ router.post("/send_template_message", validateUser, async (req, res) => {
         getMETA[0].waba_id,
         getMETA[0].access_token
       );
+
+      // Network / API failure (e.g. ENOTFOUND, timeout) — the helper returns
+      // an { error } object instead of throwing. Treat this as "cannot reach Meta".
+      if (templatesResponse?.error || !templatesResponse?.data) {
+        templateFetchFailed = true;
+        console.error('⚠️ Could not fetch templates from Meta (network/API issue):', templatesResponse?.error?.message || 'no data');
+      }
       
       if (templatesResponse && templatesResponse.data) {
         const matchingTemplate = templatesResponse.data.find(
@@ -3735,8 +3855,19 @@ router.post("/send_template_message", validateUser, async (req, res) => {
         }
       }
     } catch (detectError) {
+      templateFetchFailed = true;
       console.error(`⚠️ Failed to auto-detect template type:`, detectError.message);
-      // Continue with STANDARD type
+    }
+
+    // If we couldn't reach Meta to read the template, DON'T send a possibly
+    // invalid payload (e.g. a FLOW-button template without its flow component,
+    // which Meta rejects with 131009). Fail fast with a clear connection error.
+    if (templateFetchFailed) {
+      return res.json({
+        success: false,
+        msg: "Could not reach WhatsApp servers to read the template. Check the server's internet connection and try again.",
+        error: { code: 'NETWORK', message: 'Unable to reach graph.facebook.com' },
+      });
     }
 
     // Send template based on detected type
@@ -3776,6 +3907,29 @@ router.post("/send_template_message", validateUser, async (req, res) => {
       );
     } else {
       // Standard template
+      // Detect if template has a FLOW button — Meta requires a button component
+      // with sub_type "flow" even though it carries no runtime parameters.
+      const flowButtonIndex = templateStructure?.components
+        ?.find(c => c.type === "BUTTONS")
+        ?.buttons?.findIndex(b => b.type === "FLOW") ?? -1;
+
+      // Build extra button variables for FLOW button if needed
+      const effectiveButtonVariables = [...button_variables];
+      if (flowButtonIndex >= 0) {
+        // Only add if not already present for that index
+        const alreadyHasFlowParam = effectiveButtonVariables.some(
+          bv => String(bv.index) === String(flowButtonIndex)
+        );
+        if (!alreadyHasFlowParam) {
+          effectiveButtonVariables.push({
+            index: flowButtonIndex,
+            sub_type: "flow",
+            parameters: [],
+          });
+        }
+        console.log(`🔗 FLOW button detected at index ${flowButtonIndex} — adding flow button component`);
+      }
+
       response = await sendTemplateMessage(
         "v18.0",
         getMETA[0]?.business_phone_number_id,
@@ -3785,7 +3939,7 @@ router.post("/send_template_message", validateUser, async (req, res) => {
         formattedPhone,
         body_variables,
         header_variable,
-        button_variables,
+        effectiveButtonVariables,
       );
     }
 

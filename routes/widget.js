@@ -194,7 +194,6 @@ router.post("/api/widget/chat/:uniqueId/send", async (req, res) => {
         origin_instance_id: JSON.stringify({ id: widget.unique_id, title: String(widget.title || "Website").slice(0, 80) }),
         last_message: JSON.stringify({ ...newMessage, senderName }),
         unread_count: 1,
-        is_opened: 0,
         assigned_agent: null,
         createdAt: new Date(),
         updatedAt: new Date(),

@@ -1,6 +1,6 @@
 {
   "name": "server",
-  "description": "this code is made for https://codecanyon.net/user/codeyon_itservices/portfolio created by hamidsaifi.com",
+  "description": "WhatsCRM backend server",
   "main": "server.js",
   "scripts": {
     "test": "jest --verbose --runInBand",

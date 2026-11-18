@@ -29,6 +29,7 @@ const { checkPlan } = require("../middlewares/plan.js");
 const { processMessage } = require("../helper/inbox/inbox.js");
 const { sendQrMsg } = require("../helper/socket/function.js");
 const { saveMessageToConversation } = require("../functions/function.js");
+const { normalizePhone } = require("../functions/phone.js");
 const con = require("../database/config.js");
 const { updateMessageStatus } = require("../loops/campaignBeta.js");
 const {
@@ -39,6 +40,7 @@ const { handleCalls } = require("../helper/addon/wacall/wacall.js");
 const {
   handleBroadcastCallConnect,
   handleBroadcastCallTerminate,
+  updateContactInBroadcast,
   outgoingCallStates,
 } = require("../helper/addon/wacall/broadcastProcessor.js");
 
@@ -122,6 +124,31 @@ async function sendInboxMessage({ uid, toNumber, toName, chatId, msgContext }) {
     );
 
     return { success: true, msg: "Message sent", id: sendMsg.id };
+  }
+
+  // ── Website live chat: save = deliver (the widget polls) ─────────────────
+  if (origin === "webchat") {
+    if (!chatInfo) return { success: false, msg: "Chat not found" };
+    const id = `wc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const messageData = {
+      type: msgContext.type,
+      metaChatId: id,
+      msgContext,
+      reaction: "",
+      timestamp: Math.round(Date.now() / 1000),
+      senderName: toName,
+      senderMobile: toNumber,
+      star: 0,
+      route: "OUTGOING",
+      context: null,
+      origin: "webchat",
+    };
+    await saveMessageToConversation({ uid, chatId, messageData });
+    await query(
+      `UPDATE beta_chats SET last_message = ? WHERE chat_id = ? AND uid = ?`,
+      [JSON.stringify(messageData), chatId, uid],
+    );
+    return { success: true, msg: "Message sent", id };
   }
 
   // ── Meta Cloud API channel (default) ──────────────────────────────────────
@@ -640,27 +667,15 @@ async function updateBroadcastContactPermission(mobile, status, reply) {
                 : null;
           }
 
-          let statsUpdate = {};
-          if (status === "granted") {
-            statsUpdate.permission_granted =
-              (broadcast.permission_granted || 0) + 1;
-          } else if (status === "denied") {
-            statsUpdate.permission_denied =
-              (broadcast.permission_denied || 0) + 1;
-          }
-
-          let updateQuery = `UPDATE wa_call_broadcasts SET contacts = ?`;
-          let updateParams = [JSON.stringify(contacts)];
-
-          Object.keys(statsUpdate).forEach((key) => {
-            updateQuery += `, ${key} = ?`;
-            updateParams.push(statsUpdate[key]);
-          });
-
-          updateQuery += ` WHERE campaign_id = ?`;
-          updateParams.push(broadcast.campaign_id);
-
-          await query(updateQuery, updateParams);
+          // Only update the `contacts` JSON — the per-status stat columns
+          // (permission_granted, permission_denied, …) do not exist in the
+          // minimal wa_call_broadcasts schema and writing them throws
+          // "Unknown column", which previously prevented the grant from being
+          // saved and blocked the call from ever being placed.
+          await query(
+            `UPDATE wa_call_broadcasts SET contacts = ? WHERE campaign_id = ?`,
+            [JSON.stringify(contacts), broadcast.campaign_id],
+          );
 
           console.log(
             `✅ Updated permission for ${mobile} in campaign ${broadcast.campaign_id}`,
@@ -1254,8 +1269,10 @@ router.post("/start_new_conversation", validateUser, async (req, res) => {
       return res.json({ success: false, msg: "Phone number is required" });
     }
 
-    // Clean phone number (remove spaces, dashes, plus sign, etc.)
-    const cleanPhone = phone.replace(/[^\d]/g, ""); // Remove everything except digits
+    // Normalize phone: strip non-digits AND pad bare 10-digit numbers to the
+    // default country code so this matches the fully-qualified wa_id Meta sends
+    // on inbound webhooks. Prevents duplicate chats (e.g. 9949512262 vs 919949512262).
+    const cleanPhone = normalizePhone(phone);
 
     if (!cleanPhone) {
       return res.json({ success: false, msg: "Invalid phone number format" });
@@ -1459,8 +1476,10 @@ router.post("/start_conversation_with_template", validateUser, async (req, res) 
       });
     }
 
-    // Clean phone number
-    const cleanPhone = phone.replace(/[^\d]/g, '');
+    // Normalize phone: strip non-digits AND pad bare 10-digit numbers to the
+    // default country code so this matches the inbound Meta webhook's wa_id
+    // and reuses the SAME chat instead of creating a duplicate.
+    const cleanPhone = normalizePhone(phone);
     
     if (!cleanPhone) {
       return res.json({
@@ -1578,11 +1597,24 @@ router.post("/start_conversation_with_template", validateUser, async (req, res) 
       [] // Button Variables
     );
 
-    if (!templateResponse || templateResponse.error) {
-      console.error('❌ Template send failed:', templateResponse?.error);
+    // Treat it as a real failure if Meta returned an error OR did not return a
+    // message id. A missing messages[0].id means Meta did NOT accept the send,
+    // so we must NOT record it as a successful outgoing message.
+    const metaMsgId = templateResponse?.messages?.[0]?.id;
+    if (!templateResponse || templateResponse.error || !metaMsgId) {
+      const metaErr = templateResponse?.error;
+      console.error('❌ Template send failed:', JSON.stringify(metaErr || templateResponse, null, 2));
+      // Surface Meta's actual reason (code + message + details) so the UI shows
+      // WHY it failed instead of a misleading "sent".
+      const reason =
+        metaErr?.error_data?.details ||
+        metaErr?.message ||
+        "WhatsApp did not accept this message (no message id returned).";
+      const code = metaErr?.code ? ` (code ${metaErr.code})` : "";
       return res.json({
         success: false,
-        msg: templateResponse?.error?.message || "Failed to send template message"
+        msg: `${reason}${code}`,
+        metaError: metaErr || null,
       });
     }
 
@@ -1642,14 +1674,20 @@ router.post("/start_conversation_with_template", validateUser, async (req, res) 
     }
 
     // Save conversation record
+    // NOTE: metaChatId MUST be persisted here. It is the message id Meta returns
+    // (templateResponse.messages[0].id). Delivery/read/failed status webhooks are
+    // matched back to this row `WHERE metaChatId = ?`, so without it the message
+    // is stuck at "sent" forever and we can never surface a real failure reason.
     await query(
       `INSERT INTO beta_conversation 
-       (uid, chat_id, type, msgContext, timestamp, senderName, senderMobile, route, origin, createdAt) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+       (uid, chat_id, type, metaChatId, status, msgContext, timestamp, senderName, senderMobile, route, origin, createdAt) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         req.decode.uid,
         chatId,
         'template',
+        lastMessagePayload.metaChatId || null,
+        'sent',
         JSON.stringify(lastMessagePayload.msgContext),
         lastMessagePayload.timestamp,
         name || cleanPhone,

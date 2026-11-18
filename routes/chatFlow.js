@@ -218,10 +218,14 @@ router.post("/insert_flow_beta", validateUser, async (req, res) => {
       `SELECT * FROM beta_flows WHERE flow_id = ?`,
       [flow_id],
     );
+    if (cehckId && cehckId.uid !== req.decode.uid) {
+      // flow_id is globally unique; never let one account overwrite another's flow.
+      return res.json({ success: false, msg: "This flow id belongs to another account. Create a new flow instead." });
+    }
     if (cehckId) {
       await query(
-        `UPDATE beta_flows SET name = ?, data = ?, source = ? WHERE flow_id = ?`,
-        [name, JSON.stringify(data), source, flow_id],
+        `UPDATE beta_flows SET name = ?, data = ?, source = ? WHERE flow_id = ? AND uid = ?`,
+        [name, JSON.stringify(data), source, flow_id, req.decode.uid],
       );
 
       res.json({ msg: "Flows was updated", success: true });
@@ -280,6 +284,23 @@ router.get("/get_flows_beta", validateUser, async (req, res) => {
   } catch (err) {
     console.error('[get_flows_beta] Error:', err);
     res.json({ success: false, msg: err.message || "something went wrong" });
+  }
+});
+
+// Pause / resume a flow. Chatbots only run flows with is_active = 1.
+router.post("/set_flow_active", validateUser, async (req, res) => {
+  try {
+    const { flow_id, active } = req.body;
+    if (!flow_id) return res.json({ success: false, msg: "flow_id is required" });
+    const result = await query(
+      `UPDATE beta_flows SET is_active = ? WHERE flow_id = ? AND uid = ?`,
+      [active ? 1 : 0, flow_id, req.decode.uid],
+    );
+    if (!result?.affectedRows) return res.json({ success: false, msg: "Flow not found" });
+    res.json({ success: true, msg: active ? "Flow activated" : "Flow paused" });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong" });
   }
 });
 
@@ -400,18 +421,21 @@ router.post("/remove_number_from_activity", validateUser, async (req, res) => {
   try {
     const { type, number, flowId } = req.body;
 
-    const [flow] = await query(`SELECT * FROM flow WHERE flow_id = ?`, [
+    const [flow] = await query(`SELECT * FROM flow WHERE flow_id = ? AND uid = ?`, [
       flowId,
+      req.decode.uid,
     ]);
+    if (!flow) return res.json({ success: false, msg: "Flow not found" });
 
     if (type == "AI") {
       // removing from ai arr
       const aiArr = flow?.ai_list ? JSON.parse(flow?.ai_list) : [];
       const updatedArr = aiArr?.filter((x) => x.senderNumber !== number);
 
-      await query(`UPDATE flow SET ai_list = ? WHERE flow_id = ?`, [
+      await query(`UPDATE flow SET ai_list = ? WHERE flow_id = ? AND uid = ?`, [
         JSON.stringify(updatedArr),
         flowId,
+        req.decode.uid,
       ]);
     } else if (type == "DISABLED") {
       // removing from prevent arr
@@ -422,9 +446,10 @@ router.post("/remove_number_from_activity", validateUser, async (req, res) => {
         (x) => x.senderNumber !== number,
       );
 
-      await query(`UPDATE flow SET prevent_list = ? WHERE flow_id = ?`, [
+      await query(`UPDATE flow SET prevent_list = ? WHERE flow_id = ? AND uid = ?`, [
         JSON.stringify(updatedPreventArr),
         flowId,
+        req.decode.uid,
       ]);
     }
 
@@ -471,7 +496,7 @@ router.post("/enable_chat_agent", validateAgent, async (req, res) => {
   try {
     const { id } = req.body;
 
-    await query(`DELETE FROM flow_session WHERE id = ?`, [id]);
+    await query(`DELETE FROM flow_session WHERE id = ? AND uid = ?`, [id, req.owner.uid]);
     res.json({ msg: "Auto reply enabled", success: true });
   } catch (err) {
     console.log(err);
@@ -483,7 +508,7 @@ router.post("/enable_chat", validateUser, async (req, res) => {
   try {
     const { id } = req.body;
 
-    await query(`DELETE FROM flow_session WHERE id = ?`, [id]);
+    await query(`DELETE FROM flow_session WHERE id = ? AND uid = ?`, [id, req.decode.uid]);
 
     res.json({ msg: "Auto reply enabled", success: true });
   } catch (err) {
@@ -495,10 +520,17 @@ router.post("/enable_chat", validateUser, async (req, res) => {
 router.post("/disable_chat", validateUser, async (req, res) => {
   try {
     const { id } = req.body;
+    const ownerUid = req.decode.uid;
 
-    const [flow] = await query(`SELECT * FROM flow_session WHERE id = ?`, [id]);
+    const [flow] = await query(`SELECT * FROM flow_session WHERE id = ? AND uid = ?`, [id, ownerUid]);
+    if (!flow) return res.json({ success: false, msg: "Session not found" });
     if (flow) {
-      let data = flow?.data ? JSON.parse(flow?.data) : {};
+      let data = {};
+      try {
+        data = flow?.data ? JSON.parse(flow.data) : {};
+      } catch {
+        data = {};
+      }
 
       // Add 1 year + 10 minutes to current time
       const currentTime = new Date();
@@ -511,9 +543,10 @@ router.post("/disable_chat", validateUser, async (req, res) => {
       };
 
       // Save back to DB
-      await query(`UPDATE flow_session SET data = ? WHERE id = ?`, [
+      await query(`UPDATE flow_session SET data = ? WHERE id = ? AND uid = ?`, [
         JSON.stringify(data),
         id,
+        ownerUid,
       ]);
     }
 
@@ -527,10 +560,17 @@ router.post("/disable_chat", validateUser, async (req, res) => {
 router.post("/disable_chat_agent", validateAgent, async (req, res) => {
   try {
     const { id } = req.body;
+    const ownerUid = req.owner.uid;
 
-    const [flow] = await query(`SELECT * FROM flow_session WHERE id = ?`, [id]);
+    const [flow] = await query(`SELECT * FROM flow_session WHERE id = ? AND uid = ?`, [id, ownerUid]);
+    if (!flow) return res.json({ success: false, msg: "Session not found" });
     if (flow) {
-      let data = flow?.data ? JSON.parse(flow?.data) : {};
+      let data = {};
+      try {
+        data = flow?.data ? JSON.parse(flow.data) : {};
+      } catch {
+        data = {};
+      }
 
       // Add 1 year + 10 minutes to current time
       const currentTime = new Date();
@@ -543,9 +583,10 @@ router.post("/disable_chat_agent", validateAgent, async (req, res) => {
       };
 
       // Save back to DB
-      await query(`UPDATE flow_session SET data = ? WHERE id = ?`, [
+      await query(`UPDATE flow_session SET data = ? WHERE id = ? AND uid = ?`, [
         JSON.stringify(data),
         id,
+        ownerUid,
       ]);
     }
 
@@ -596,8 +637,14 @@ router.post("/reset_dc_sess", validateUser, async (req, res) => {
       [id, req.decode.uid],
     );
 
-    if (getSess) {
-      let a = JSON.parse(getSess.data);
+    if (!getSess) return res.json({ success: false, msg: "Session not found" });
+    {
+      let a = {};
+      try {
+        a = getSess.data ? JSON.parse(getSess.data) : {};
+      } catch {
+        a = {};
+      }
       delete a.disableChat;
       await query(`UPDATE flow_session SET data = ? WHERE id = ?`, [
         JSON.stringify(a),
@@ -711,7 +758,7 @@ router.get("/get_origians", validateUser, async (req, res) => {
 
       const correctOrign =
         teleSess?.map((x) => ({
-          title: x.data ? JSON.parse(x.data)?.number : "NOT USABLE",
+          title: x.phone || `Telegram ${x.id}`,
           code: "TELEGRAM",
           data: x,
         })) || [];
@@ -755,10 +802,31 @@ router.post("/generate", validateUser, async (req, res) => {
       mode, // "create" | "edit"
     } = req.body;
 
-    if (!instruction || !provider?.id || !model?.id || !apiKey) {
+    if (!instruction || !provider?.id || !model?.id) {
       return res.json({
         success: false,
-        msg: "instruction, provider, model, and apiKey are required",
+        msg: "instruction, provider, and model are required",
+      });
+    }
+
+    // Use the key from the request body, or fall back to the user's saved
+    // global AI key (stored once on the Lead Auto-Call page).
+    let resolvedKey = apiKey;
+    if (!resolvedKey) {
+      try {
+        const { getSettings } = require("../helper/addon/wacall/leadStore.js");
+        const saved = await getSettings(req.decode.uid);
+        const pid = (provider.id || "").toLowerCase();
+        if (pid === "openrouter") resolvedKey = saved.openrouter_api_key;
+        else if (pid === "gemini") resolvedKey = saved.gemini_api_key || process.env.GEMINI_API_KEY;
+        else if (pid === "openai") resolvedKey = process.env.OPENAI_API_KEY;
+        else if (pid === "deepseek") resolvedKey = process.env.DEEPSEEK_API_KEY;
+      } catch (_) {}
+    }
+    if (!resolvedKey) {
+      return res.json({
+        success: false,
+        msg: `No API key provided and no saved key found. Enter your ${provider.id} key in the AI builder dialog, or save it on the Lead Auto-Call page.`,
       });
     }
 
@@ -773,21 +841,16 @@ router.post("/generate", validateUser, async (req, res) => {
 
     switch (provider.id.toLowerCase()) {
       case "openai":
-        rawJson = await callOpenAI(apiKey, model.id, systemPrompt, userPrompt);
+        rawJson = await callOpenAI(resolvedKey, model.id, systemPrompt, userPrompt);
         break;
       case "gemini":
-        rawJson = await callGemini(apiKey, model.id, systemPrompt, userPrompt);
+        rawJson = await callGemini(resolvedKey, model.id, systemPrompt, userPrompt);
         break;
       case "deepseek":
-        rawJson = await callDeepSeek(
-          apiKey,
-          model.id,
-          systemPrompt,
-          userPrompt,
-        );
+        rawJson = await callDeepSeek(resolvedKey, model.id, systemPrompt, userPrompt);
         break;
       case "openrouter":
-        rawJson = await callOpenRouter(apiKey, model.id, systemPrompt, userPrompt);
+        rawJson = await callOpenRouter(resolvedKey, model.id, systemPrompt, userPrompt);
         break;
       default:
         return res.json({ success: false, msg: "Unsupported provider" });

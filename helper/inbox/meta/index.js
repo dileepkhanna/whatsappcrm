@@ -5,16 +5,21 @@ const moment = require("moment");
 const mime = require("mime-types");
 const fs = require("fs");
 const path = require("path");
+// Shared phone normalizer — keeps inbound webhook chat_id in lock-step with the
+// outgoing paths so a customer's reply lands on the SAME chat we started.
+const { normalizePhoneFromId } = require("../../../functions/phone.js");
 
 // Utility Functions
 function getCurrentTimestamp() {
   return Math.round(Date.now() / 1000);
 }
 
+// Extract a normalized phone number from a Meta wa_id / id string. Delegates to
+// the shared normalizer so bare 10-digit numbers get the country code and the
+// result matches every other chat_id builder. Returns null when nothing usable.
 function extractPhoneNumber(str) {
-  if (!str) return null;
-  const match = str.match(/^(\d+)/);
-  return match ? match[1] : null;
+  const normalized = normalizePhoneFromId(str);
+  return normalized || null;
 }
 
 function formatMessage(type, content) {
@@ -152,7 +157,9 @@ async function updateChatInMysql({
     const updateFields = {
       last_message: JSON.stringify(actualMsg),
       sender_name: senderName || "NA",
-      sender_mobile: senderMobile || "NA",
+      // Normalize so the stored number matches the chat_id digits (and the
+      // outgoing paths), keeping a single row per contact.
+      sender_mobile: normalizePhoneFromId(senderMobile) || senderMobile || "NA",
       origin: "meta",
     };
 

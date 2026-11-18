@@ -758,6 +758,10 @@ function processSocketEvent({
               uid: isAgent ? socket?.userData?.owner_uid : uid,
               chatInfo,
             });
+          } else if (chatInfo?.origin === "webchat") {
+            // Website live chat: saving it below is the delivery (the widget polls).
+            msgObj.origin = "webchat";
+            sendMsg = { success: true, id: `wc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` };
           }
 
           if (!sendMsg?.success) {

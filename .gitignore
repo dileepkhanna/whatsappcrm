@@ -370,3 +370,7 @@ NOTES.md
 # Last updated: January 2025 (ASE Technologies WhatsApp CRM)
 # ============================================================
 
+
+# Inbox debug log (contains access tokens) and local browser-test output
+routes/log.txt
+.playwright-mcp/

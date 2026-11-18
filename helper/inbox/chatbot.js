@@ -1,7 +1,12 @@
 const { query } = require("../../database/dbpromise");
 const { processFlow } = require("../../automation/automation");
+const { getActiveFlows } = require("../../automation/functions");
+const { normalizePhoneFromId } = require("../../functions/phone.js");
 
-async function processWebhook(newMessage, user) {
+// Runs every active chatbot bound to the channel the message came in on.
+// ctx.sessionId: QR instance uniqueId / Instagram user_id / Telegram session id
+// ctx.chatId: the inbox chat id the channel handler built (required off-Meta)
+async function processWebhook(newMessage, user, ctx = {}) {
   try {
     console.log("🔵 processWebhook called with:", {
       hasMsgContext: !!newMessage?.msgContext,
@@ -50,53 +55,41 @@ async function processWebhook(newMessage, user) {
       type: newMessage?.type,
     });
 
-    // Get active beta chatbots for this origin
-    let chatbots = [];
-    if (origin === "meta") {
-      chatbots = await query(
-        `SELECT flow_id, uid, origin_id FROM beta_chatbot 
-         WHERE uid = ? AND origin_id = ? AND active = 1`,
-        [uid, "META"],
-      );
+    const channel = String(origin || "").toLowerCase();
+    const SUPPORTED = ["meta", "qr", "telegram", "instagram", "instagram_comment", "webchat"];
+    if (!SUPPORTED.includes(channel)) {
+      return console.log("❌ processWebhook: unsupported channel", origin);
+    }
+    const sessionId = channel === "meta" ? "" : String(ctx.sessionId || "");
+    if (channel !== "meta" && !sessionId) {
+      return console.log(`❌ processWebhook: no session id for ${channel} message`);
+    }
+    const chatId =
+      channel === "meta"
+        ? `meta_${normalizePhoneFromId(senderMobile)}_${uid}`
+        : ctx.chatId;
+    if (!chatId) {
+      return console.log(`❌ processWebhook: no chat id for ${channel} message`);
     }
 
-    console.log("🤖 Found beta chatbots:", {
-      count: chatbots?.length,
-      origin,
-      uid,
-    });
-
-    if (chatbots?.length < 1) {
-      return console.log(
-        "❌ No active beta chatbots found for META origin",
-        uid,
-      );
+    // Active chatbots bound to this channel (Meta, a QR number, an Instagram
+    // account…) joined with their active flows of the matching source.
+    let flows = [];
+    try {
+      flows = await getActiveFlows({ uid, origin: channel, sessionId });
+    } catch (e) {
+      return console.log("❌ processWebhook: getActiveFlows failed", e?.message);
     }
 
-    // Get flow IDs from chatbots
-    const flowIds = chatbots.map((c) => c.flow_id);
-
-    console.log("🔍 Looking for flows:", {
-      flowIds,
-      uid,
-      source: "wa_chatbot",
-    });
-
-    // Get active flows
-    const flows = await query(
-      `SELECT * FROM beta_flows 
-       WHERE uid = ? AND is_active = 1 AND source = ? 
-       AND flow_id IN (?)`,
-      [uid, "wa_chatbot", flowIds],
-    );
-
-    console.log("📊 Found flows:", {
+    console.log("📊 Found chatbot flows:", {
+      channel,
+      sessionId: sessionId || undefined,
       count: flows?.length,
       flowIds: flows?.map((f) => f.flow_id),
     });
 
-    if (flows?.length < 1) {
-      return console.log("❌ No active flows found for chatbots");
+    if (!flows?.length) {
+      return console.log(`❌ No active chatbot flows for ${channel}`, uid);
     }
 
     // Process each flow
@@ -119,9 +112,6 @@ async function processWebhook(newMessage, user) {
           continue;
         }
 
-        // Generate chatId based on origin
-        const chatId = `meta_${senderMobile.replace(/\D/g, "")}_${uid}`;
-
         console.log("🤖 Processing beta chatbot flow:", {
           flowId: flow.flow_id,
           senderMobile,
@@ -138,11 +128,11 @@ async function processWebhook(newMessage, user) {
           message: newMessage,
           incomingText,
           user,
-          sessionId: "",
-          origin: "meta",
+          sessionId,
+          origin: channel,
           chatId,
           element: flow,
-          webhookVariables: {},
+          webhookVariables: ctx.variables || {},
           loopDetection: { visitedNodes: new Map(), startTime: Date.now() },
         });
       } catch (err) {

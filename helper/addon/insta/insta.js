@@ -10,16 +10,30 @@ function checkInsta() {
 /**
  * Generate Instagram webhook URL for a specific user
  */
-async function genInstaWebhook(uid) {
+// Instagram webhooks are configured once per app (not per user). The webhook
+// route verifies hub.verify_token against the last URL segment, so the URL
+// ends with a stable secret token derived from the app secret.
+async function getInstaWebhookToken() {
+  const [config] = await query(`SELECT insta_app_secret FROM web_private LIMIT 1`, []);
+  if (!config?.insta_app_secret) return null;
+  return require("crypto")
+    .createHash("sha256")
+    .update(`insta-webhook:${config.insta_app_secret}`)
+    .digest("hex")
+    .slice(0, 24);
+}
+
+/**
+ * App-level Instagram webhook URL (the verify token is the last path segment).
+ */
+async function genInstaWebhook() {
   try {
-    const [config] = await query(`SELECT insta_callback_url FROM web_private LIMIT 1`, []);
-    if (!config?.insta_callback_url) {
-      console.error("[Instagram] Callback URL not configured in web_private");
-      return null;
-    }
-    // Extract domain from callback URL
-    const domain = config.insta_callback_url.replace('/api/insta/callback', '');
-    return `${domain}/api/insta/webhook/${uid}`;
+    const callback = await getInstaCallbackUri();
+    if (!callback) return null;
+    const domain = callback.replace(/\/api\/insta\/callback\/?$/, "").replace(/\/+$/, "");
+    const token = await getInstaWebhookToken();
+    if (!token) return null;
+    return `${domain}/api/insta/webhook/${token}`;
   } catch (err) {
     console.error("[Instagram] Error generating webhook URL:", err);
     return null;
@@ -27,16 +41,17 @@ async function genInstaWebhook(uid) {
 }
 
 /**
- * Subscribe to Instagram webhooks
+ * Subscribe the connected Instagram professional account to this app's webhooks
+ * (Instagram API with Instagram Login uses graph.instagram.com/me/subscribed_apps).
  */
-async function subscribeInstaWebhook(accessToken, pageId) {
+async function subscribeInstaWebhook(accessToken) {
   try {
-    const url = `https://graph.facebook.com/${API_VERSION}/${pageId}/subscribed_apps`;
-    
+    const url = `https://graph.instagram.com/${API_VERSION}/me/subscribed_apps`;
+
     const response = await axios.post(url, null, {
       params: {
         access_token: accessToken,
-        subscribed_fields: "messages,messaging_postbacks,message_reactions,message_reads,messaging_seen,messaging_deliveries",
+        subscribed_fields: "messages,messaging_postbacks,messaging_seen,message_reactions,comments",
       },
     });
 
@@ -54,11 +69,12 @@ async function subscribeInstaWebhook(accessToken, pageId) {
 async function getInstaCallbackUri() {
   try {
     const [config] = await query(`SELECT insta_callback_url FROM web_private LIMIT 1`, []);
-    if (!config?.insta_callback_url) {
-      console.error("[Instagram] Callback URL not configured in web_private");
-      return null;
-    }
-    return config.insta_callback_url;
+    if (config?.insta_callback_url) return config.insta_callback_url.trim();
+    // Default to the public app URL when the admin hasn't set one.
+    const base = String(process.env.FRONTENDURI || "").replace(/\/+$/, "");
+    if (base) return `${base}/api/insta/callback`;
+    console.error("[Instagram] Callback URL not configured in web_private");
+    return null;
   } catch (err) {
     console.error("[Instagram] Error getting callback URI:", err);
     return null;
@@ -124,7 +140,9 @@ async function fetchInstaProfile(token) {
     
     const response = await axios.get(url, {
       params: {
-        fields: "id,username,account_type,media_count",
+        // user_id is the professional account id that webhooks use as entry.id;
+        // id alone is app-scoped and would not match incoming webhooks.
+        fields: "id,user_id,username,name,account_type,profile_picture_url,media_count",
         access_token: token,
       },
     });
@@ -189,4 +207,5 @@ module.exports = {
   API_VERSION,
   getInstaCallbackUri,
   subscribeInstaWebhook,
+  getInstaWebhookToken,
 };

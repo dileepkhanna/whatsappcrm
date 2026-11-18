@@ -17,6 +17,24 @@ const { processMessage } = require("../helper/inbox/inbox.js");
 const { processAutomation } = require("../automation/automation.js");
 const { checkPlan, checkInstaInbox } = require("../middlewares/plan.js");
 
+const jwt = require("jsonwebtoken");
+
+// Escape values shown on the OAuth result page (query params / error text).
+const esc = (v) =>
+  String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+// OAuth state is a short-lived signed token so a callback can't be forged
+// to attach an Instagram account to someone else's CRM user.
+const signState = (uid) => jwt.sign({ uid, p: "insta" }, process.env.JWTKEY, { expiresIn: "15m" });
+const readState = (state) => {
+  try {
+    const d = jwt.verify(String(state || ""), process.env.JWTKEY);
+    return d?.p === "insta" ? d.uid : null;
+  } catch {
+    return null;
+  }
+};
+
 const pageStyle = `
   font-family:sans-serif;display:flex;flex-direction:column;
   align-items:center;justify-content:center;min-height:100vh;
@@ -49,7 +67,7 @@ router.get("/auth-url", validateUser, async (req, res) => {
       redirect_uri: instaCallbackUri,
       scope: SCOPES,
       response_type: "code",
-      state: req.decode.uid,
+      state: signState(req.decode.uid),
     });
 
     const url = `https://www.instagram.com/oauth/authorize?${params.toString()}`;
@@ -62,11 +80,17 @@ router.get("/auth-url", validateUser, async (req, res) => {
 
 // ─── OAuth Callback ──────────────────────────────────────
 router.get("/callback", async (req, res) => {
-  const { code, error, state: uid } = req.query;
+  const { code, error, error_description } = req.query;
+  const uid = readState(req.query.state);
 
   if (error || !code || !uid) {
+    const reason = error
+      ? `${error}${error_description ? `: ${error_description}` : ""}`
+      : !uid
+        ? "Login link expired or invalid. Please click Connect again."
+        : "Missing parameters";
     return res.send(`<html><body style="${pageStyle}">
-      <h2>❌ Error: ${error || "Missing parameters"}</h2>
+      <h2>❌ Error: ${esc(reason)}</h2>
       <script>setTimeout(() => window.close(), 3000);</script>
     </body></html>`);
   }
@@ -163,16 +187,17 @@ router.get("/callback", async (req, res) => {
       ],
     );
 
-    await subscribeInstaWebhook(finalToken);
+    const subscribed = !!(await subscribeInstaWebhook(finalToken))?.success;
 
     return res.send(`<html><body style="${pageStyle}">
-      <h2>✅ Connected @${profile.username}</h2>
+      <h2>✅ Connected @${esc(profile.username)}</h2>
       ${
         profile.profile_picture_url
-          ? `<img src="${profile.profile_picture_url}" style="width:80px;height:80px;border-radius:50%;margin:12px 0"/>`
+          ? `<img src="${esc(profile.profile_picture_url)}" style="width:80px;height:80px;border-radius:50%;margin:12px 0"/>`
           : ""
       }
-      <p>${profile.name || ""}</p>
+      <p>${esc(profile.name || "")}</p>
+      ${subscribed ? "" : `<p style="opacity:0.85;font-size:0.85rem">⚠️ Webhook subscription failed. Messages may not arrive until the app's Instagram webhook is set up.</p>`}
       <p style="opacity:0.7;font-size:0.85rem">Closing in 2 seconds...</p>
       <script>
         if (window.opener) {
@@ -185,7 +210,7 @@ router.get("/callback", async (req, res) => {
     console.log(err);
     return res.send(`<html><body style="${pageStyle}">
       <h2>❌ Error</h2>
-      <pre style="font-size:0.8rem;opacity:0.8">${err.message}</pre>
+      <pre style="font-size:0.8rem;opacity:0.8;white-space:pre-wrap">${esc(err.message)}</pre>
       <script>setTimeout(() => window.close(), 4000);</script>
     </body></html>`);
   }
@@ -223,7 +248,14 @@ router.post(
   async (req, res) => {
     try {
       const { id } = req.body;
-      await query(`DELETE FROM instagram_accounts WHERE id = ?`, [id]);
+      // Only allow disconnecting your own account.
+      const result = await query(`DELETE FROM instagram_accounts WHERE id = ? AND uid = ?`, [
+        id,
+        req.decode.uid,
+      ]);
+      if (!result?.affectedRows) {
+        return res.json({ success: false, msg: "Account not found" });
+      }
       res.json({ success: true, msg: "Account disconnected" });
     } catch (err) {
       console.log(err);

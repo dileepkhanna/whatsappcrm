@@ -4,6 +4,9 @@ const { query } = require("../../../database/dbpromise");
 const mime = require("mime-types");
 const { fetchProfileUrl } = require("./control");
 const fs = require("fs");
+// Shared phone normalizer — keeps QR inbound chat_id in lock-step with the QR
+// outgoing path (routes/inbox.js) so one contact = one chat, no dupes.
+const { normalizePhoneFromId } = require("../../../functions/phone.js");
 
 // Import downloadMediaMessage directly from baileys
 let downloadMediaMessage;
@@ -21,10 +24,13 @@ function timeoutPromise(promise, ms) {
   return Promise.race([promise, timeout]);
 }
 
+// Extract a normalized phone number from a Baileys JID (e.g.
+// "919948318650:1@s.whatsapp.net") or a plain number. Delegates to the shared
+// normalizer so the result matches every other chat_id builder. Returns null
+// when nothing usable is found (preserves previous getChatId behaviour).
 function extractPhoneNumber(str) {
-  if (!str) return null;
-  const match = str.match(/^(\d+)(?=:|\@)/);
-  return match ? match[1] : null;
+  const normalized = normalizePhoneFromId(str);
+  return normalized || null;
 }
 
 async function updateProfileMysql({
@@ -107,7 +113,9 @@ async function updateChatInMysql({
 
     const last_message = JSON.stringify(actualMsg);
     const sender_name = senderName || "NA";
-    const sender_mobile = senderMobile || "NA";
+    // Normalize so the stored number matches the chat_id digits (and the QR
+    // outgoing path), keeping a single row per contact.
+    const sender_mobile = normalizePhoneFromId(senderMobile) || senderMobile || "NA";
     const origin = "qr";
     const origin_instance_id = JSON.stringify(originInstanceId);
 

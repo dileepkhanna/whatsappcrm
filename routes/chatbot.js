@@ -257,8 +257,9 @@ router.post("/add_beta_chatbot", validateUser, checkPlan, async (req, res) => {
 
     const { nodes, edges } = flowNodesEdges;
 
-    // Interactive messages only work on META — block for others
-    if (origin?.code !== "META") {
+    // Interactive messages only work on META and the website chat (shown
+    // there as clickable options) — block for others
+    if (origin?.code !== "META" && origin?.code !== "WEBSITE") {
       const hasButtons = nodes.some(
         (node) =>
           node.data?.type?.type === "button" ||
@@ -293,29 +294,57 @@ router.post("/add_beta_chatbot", validateUser, checkPlan, async (req, res) => {
       "TELEGRAM",
       "INSTAGRAM",
       "INSTAGRAM_COMMENT",
+      "WEBSITE",
     ];
     if (!validOrigins.includes(origin.code)) {
       return res.json({ msg: `Selected Origin not found ${origin?.code}` });
     }
 
-    // ── origin-specific validation ──────────────────────────────────────────
-    if (origin.code === "QR" && !origin.data?.uniqueId) {
-      return res.json({ msg: "No active account found using this origin" });
-    }
-    if (origin.code === "TELEGRAM" && !origin.data?.id) {
-      return res.json({
-        msg: "No active Telegram session found using this origin",
-      });
-    }
-    if (origin.code === "INSTAGRAM" && !origin.data?.user_id) {
-      return res.json({
-        msg: "No active Instagram account found using this origin",
-      });
-    }
-    if (origin.code === "INSTAGRAM_COMMENT" && !origin.data?.user_id) {
-      return res.json({
-        msg: "No active Instagram account found using this origin",
-      });
+    // ── resolve the channel from THIS user's own records ────────────────────
+    // (never trust ids sent by the browser). Also builds the compact origin
+    // stored in beta_chatbot.origin, a varchar(100) column.
+    let resolvedOriginId = null;
+    let storedOrigin = null;
+    const short = (v) => String(v ?? "").slice(0, 40);
+    if (origin.code === "META") {
+      resolvedOriginId = "META";
+      storedOrigin = { code: "META", title: "Meta" };
+    } else if (origin.code === "QR") {
+      const uniqueId = origin.data?.uniqueId;
+      const [inst] = uniqueId
+        ? await query(`SELECT uniqueId, number, title, status FROM instance WHERE uid = ? AND uniqueId = ?`, [req.decode.uid, uniqueId])
+        : [];
+      if (!inst) return res.json({ success: false, msg: "That WhatsApp QR number was not found in your account" });
+      resolvedOriginId = inst.uniqueId;
+      storedOrigin = { code: "QR", title: short(inst.number || inst.title || inst.uniqueId) };
+    } else if (origin.code === "TELEGRAM") {
+      const tgId = origin.data?.id;
+      const [tg] = tgId
+        ? await query(`SELECT id, phone FROM telegram_session WHERE uid = ? AND id = ?`, [req.decode.uid, tgId])
+        : [];
+      if (!tg) return res.json({ success: false, msg: "No Telegram session found in your account" });
+      resolvedOriginId = String(origin.data?.session_id || tg.id);
+      storedOrigin = { code: "TELEGRAM", title: short(tg.phone || `Telegram ${tg.id}`) };
+    } else if (origin.code === "INSTAGRAM" || origin.code === "INSTAGRAM_COMMENT") {
+      const igId = origin.data?.user_id;
+      const [ig] = igId
+        ? await query(`SELECT user_id, username FROM instagram_accounts WHERE uid = ? AND user_id = ?`, [req.decode.uid, igId])
+        : [];
+      if (!ig) return res.json({ success: false, msg: "No Instagram account found in your account" });
+      resolvedOriginId = ig.user_id;
+      storedOrigin = { code: origin.code, title: short(`@${ig.username || ig.user_id}`) };
+    } else if (origin.code === "WEBSITE") {
+      const widgetId = origin.data?.unique_id;
+      const [w] = widgetId
+        ? await query(`SELECT unique_id, title, mode FROM chat_widget WHERE uid = ? AND unique_id = ?`, [req.decode.uid, widgetId])
+        : [];
+      if (!w) return res.json({ success: false, msg: "That website chat widget was not found in your account" });
+      // A website bot needs the in-page chat window, so switch the widget to it.
+      if (w.mode !== "live") {
+        await query(`UPDATE chat_widget SET mode = 'live' WHERE uid = ? AND unique_id = ?`, [req.decode.uid, w.unique_id]);
+      }
+      resolvedOriginId = w.unique_id;
+      storedOrigin = { code: "WEBSITE", title: short(w.title || "Website") };
     }
 
     // ── duplicate check ─────────────────────────────────────────────────────
@@ -323,7 +352,14 @@ router.post("/add_beta_chatbot", validateUser, checkPlan, async (req, res) => {
       `SELECT * FROM beta_chatbot WHERE uid = ?`,
       [req.decode.uid],
     );
-    const chatbots = getAllChatbots?.map((x) => JSON.parse(x.origin)) || [];
+    const parseOrigin = (raw) => {
+      try {
+        return JSON.parse(raw) || {};
+      } catch {
+        return {};
+      }
+    };
+    const chatbots = getAllChatbots?.map((x) => parseOrigin(x.origin)) || [];
 
     // ✅ Allow multiple chatbots for the same origin type (META, QR, etc.)
     // Only check if the EXACT same origin configuration already exists
@@ -334,7 +370,7 @@ router.post("/add_beta_chatbot", validateUser, checkPlan, async (req, res) => {
       // For META, allow multiple chatbots (each can have different flows)
       // Only block if trying to use the exact same flow_id
       const existingMetaChatbot = getAllChatbots.find(
-        (x) => x.flow_id === flow_id && JSON.parse(x.origin).code === "META"
+        (x) => x.flow_id === flow_id && parseOrigin(x.origin).code === "META"
       );
       if (existingMetaChatbot) {
         return res.json({
@@ -342,6 +378,15 @@ router.post("/add_beta_chatbot", validateUser, checkPlan, async (req, res) => {
         });
       }
     } else if (
+      resolvedOriginId &&
+      getAllChatbots.some((x) => x.origin_id === resolvedOriginId && parseOrigin(x.origin).code === origin.code && x.flow_id === flow_id)
+    ) {
+      // Same channel + same flow already exists
+      return res.json({
+        msg: "A chatbot with this channel and flow already exists",
+      });
+    } else if (
+      !resolvedOriginId &&
       chatbots.find((x) => x.title === origin?.title && x.code === origin?.code)
     ) {
       // For other origins (QR, Telegram, Instagram), check by title and code
@@ -352,7 +397,9 @@ router.post("/add_beta_chatbot", validateUser, checkPlan, async (req, res) => {
 
     // ── resolve origin_id ───────────────────────────────────────────────────
     let origin_id;
-    if (origin.code === "META") {
+    if (resolvedOriginId) {
+      origin_id = resolvedOriginId;
+    } else if (origin.code === "META") {
       origin_id = "META";
     } else if (origin.code === "TELEGRAM") {
       origin_id = origin.data?.session_id || origin.data?.id;
@@ -378,19 +425,36 @@ router.post("/add_beta_chatbot", validateUser, checkPlan, async (req, res) => {
       source = "wa_chatbot";
     }
 
+    // One active chatbot per channel: if this channel already has an active
+    // bot, save the new one paused so customers don't get two replies.
+    const [activeOnChannel] = await query(
+      `SELECT id FROM beta_chatbot WHERE uid = ? AND source = ? AND (origin_id <=> ?) AND active = 1 LIMIT 1`,
+      [req.decode.uid, source, origin_id],
+    );
+    const startActive = activeOnChannel ? 0 : 1;
+
     await query(
-      `INSERT INTO beta_chatbot (uid, source, title, flow_id, origin, origin_id) VALUES (?,?,?,?,?,?)`,
+      `INSERT INTO beta_chatbot (uid, source, title, flow_id, origin, origin_id, active) VALUES (?,?,?,?,?,?,?)`,
       [
         req.decode.uid,
         source,
         title,
         flow_id,
-        JSON.stringify(origin),
+        // Compact record for known channels; webhook-automation origins keep
+        // their full object (matched with LIKE on webhook_id at runtime).
+        JSON.stringify(storedOrigin || origin),
         origin_id,
+        startActive,
       ],
     );
 
-    res.json({ success: true, msg: "Chatbot was added successfully" });
+    res.json({
+      success: true,
+      active: !!startActive,
+      msg: startActive
+        ? "Chatbot was added and is live"
+        : "Chatbot was added paused, because another chatbot is already active on this channel. Turn it on to switch.",
+    });
   } catch (err) {
     console.log(err);
     res.json({ success: false, msg: "Something went wrong", err });
@@ -416,15 +480,24 @@ router.get("/get_beta_chatbots", validateUser, async (req, res) => {
 router.post("/change_beta_bot_status", validateUser, async (req, res) => {
   try {
     const { id, status } = req.body;
-    
-    // If activating a chatbot, deactivate ALL other chatbots first.
-    // Only ONE chatbot can be active at a time for the user.
+
+    const [bot] = await query(
+      `SELECT id, source, origin_id FROM beta_chatbot WHERE id = ? AND uid = ?`,
+      [id, req.decode.uid],
+    );
+    if (!bot) {
+      return res.json({ success: false, msg: "Chatbot not found" });
+    }
+
+    // One active chatbot per channel: activating this one turns off the
+    // others on the SAME channel only (Meta, a QR number, an Instagram
+    // account…), not the user's bots on other channels.
     if (status) {
       await query(
-        `UPDATE beta_chatbot SET active = 0 WHERE uid = ? AND id != ?`,
-        [req.decode.uid, id]
+        `UPDATE beta_chatbot SET active = 0
+         WHERE uid = ? AND id != ? AND source = ? AND (origin_id <=> ?)`,
+        [req.decode.uid, bot.id, bot.source, bot.origin_id]
       );
-      console.log(`🔄 Auto-deactivated all other chatbots for user ${req.decode.uid}`);
     }
     
     // Now activate/deactivate the target chatbot

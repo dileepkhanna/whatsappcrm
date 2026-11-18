@@ -776,8 +776,8 @@ router.post("/exchange-token", async (req, res) => {
   }
 });
 
-// get embed config
-router.get("/get_web_pvt", async (req, res) => {
+// get embed config (admin only: this returns every private key in web_private)
+router.get("/get_web_pvt", adminValidator, async (req, res) => {
   try {
     const [data] = await query(`SELECT * FROM web_private`, []);
     const webhook = await genEmbedWebhook();

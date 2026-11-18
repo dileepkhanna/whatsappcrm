@@ -84,10 +84,18 @@ app.use("/media", createMediaMiddleware("./client/public/media"));
 app.use("/meta-media", createMediaMiddleware("./client/public/meta-media"));
 
 // ─── Static & Catch-All ───────────────────────────────────────────────────────
-app.use(express.static(path.resolve(currentDir, "./client/public")));
+// Serve the current Vite build from frontend/dist (produced by `npm run build`).
+// The legacy client/public bundle is kept only for its media folders (served
+// above) and is NOT used for the app shell. Fall back to client/public if a
+// dist build hasn't been produced yet, so the server still boots.
+const distDir = path.resolve(currentDir, "./frontend/dist");
+const legacyDir = path.resolve(currentDir, "./client/public");
+const webRoot = fs.existsSync(path.join(distDir, "index.html")) ? distDir : legacyDir;
+
+app.use(express.static(webRoot));
 
 app.get("*", function (request, response) {
-  response.sendFile(path.resolve(currentDir, "./client/public", "index.html"));
+  response.sendFile(path.resolve(webRoot, "index.html"));
 });
 
 // ─── Server ───────────────────────────────────────────────────────────────────
@@ -114,6 +122,13 @@ const server = app.listen(process.env.PORT || 3010, () => {
     warmerLoopInit(); // ✅ ENABLED - WhatsApp number warmer (QR devices only)
     initCampaign(); // ✅ ENABLED - Process campaigns
     // initTele(); // Uncomment if using Telegram
+
+    // ✅ Lead Auto-Call: poll published Google Sheets for new ad-campaign leads.
+    try {
+      require("./helper/addon/wacall/sheetPoller.js").startSheetPoller();
+    } catch (e) {
+      console.error("Failed to start Lead Auto-Call sheet poller:", e.message);
+    }
   }, 1000);
 });
 

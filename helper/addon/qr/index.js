@@ -344,6 +344,22 @@ async function createSession(sessionId, isReconnect = false) {
               if (socketConnections.length > 0) {
                 console.log(`✅ Socket events emitted for incoming message`);
               }
+
+              // Run QR chatbots for real 1:1 customer messages (not groups,
+              // status broadcasts, or our own messages).
+              const jid = String(message?.key?.remoteJid || "");
+              const isDirect = !jid.endsWith("@g.us") && jid !== "status@broadcast" && !jid.endsWith("@newsletter");
+              if (isDirect && !message?.key?.fromMe) {
+                try {
+                  const { processWebhook } = require("../../inbox/chatbot");
+                  await processWebhook(result.newMessage, userData, {
+                    sessionId,
+                    chatId: result.chatId,
+                  });
+                } catch (botErr) {
+                  console.error("❌ QR chatbot error:", botErr?.message || botErr);
+                }
+              }
             }
           } else if (message.message) {
             console.log(`⚠️  Message processed but no result returned`);

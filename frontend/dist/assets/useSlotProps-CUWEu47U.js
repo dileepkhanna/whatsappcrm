@@ -1,1 +1,0 @@
-import{d as e}from"./ButtonBase-GCTXU859.js";import{a as t,i as n,n as r}from"./useSlot-CRE_kF9Y.js";function i(i){let{elementType:a,externalSlotProps:o,ownerState:s,skipResolvingSlotProps:c=!1,...l}=i,u=c?{}:n(o,s),{props:d,internalRef:f}=r({...l,externalSlotProps:u}),p=e(f,u?.ref,i.additionalProps?.ref);return t(a,{...d,ref:p},s)}export{i as t};

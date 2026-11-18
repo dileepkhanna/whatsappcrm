@@ -366,7 +366,10 @@ async function processMessage({
       }
 
       // Process the message through the flow builder
-      await processWebhook(latestConversation?.newMessage, user);
+      await processWebhook(latestConversation?.newMessage, user, {
+        sessionId: latestConversation?.sessionId || sessionId,
+        chatId: latestConversation?.chatId,
+      });
 
       await processAutomation({
         uid,

@@ -15,7 +15,45 @@ const {
   processPermissionRequests,
   processBroadcastCalls,
 } = require("../helper/addon/wacall/broadcastProcessor.js");
+const leadStore = require("../helper/addon/wacall/leadStore.js");
+const leadCaller = require("../helper/addon/wacall/leadCaller.js");
+const sheetPoller = require("../helper/addon/wacall/sheetPoller.js");
 const axios = require("axios");
+const stream = require("stream");
+const csv = require("csv-parser");
+
+// Parse an uploaded CSV buffer into an array of row objects (header-keyed).
+function parseCsvBuffer(buf) {
+  return new Promise((resolve) => {
+    if (!buf) return resolve([]);
+    const rows = [];
+    const bufferStream = new stream.PassThrough();
+    bufferStream.end(buf);
+    bufferStream
+      .pipe(csv())
+      .on("data", (d) => rows.push(d))
+      .on("end", () => resolve(rows))
+      .on("error", () => resolve([]));
+  });
+}
+
+// Forgiving column picker: matches common header names case-insensitively.
+function pickField(row, keys) {
+  const lower = {};
+  for (const k of Object.keys(row)) lower[k.trim().toLowerCase()] = row[k];
+  for (const key of keys) {
+    const v = lower[key];
+    if (v != null && String(v).trim() !== "") return String(v).trim();
+  }
+  return "";
+}
+
+// Escape a value for CSV output.
+function csvCell(v) {
+  const s = v == null ? "" : String(v);
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
 
 // add new beta
 router.post("/insert_flow", validateUser, checkPlan, async (req, res) => {
@@ -113,12 +151,66 @@ router.post("/fetch_el_voice", validateUser, async (req, res) => {
   }
 });
 
+// Google Gemini free prebuilt TTS voices. These are fixed voice NAMES the
+// Gemini TTS API accepts (voiceName), so no API call/key is needed to list them.
+const GEMINI_VOICES = [
+  "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Aoede",
+  "Leda", "Orus", "Callirrhoe", "Autonoe", "Enceladus", "Iapetus",
+];
+
+// Provider-aware voice fetch. Body: { apiKey, provider }.
+// provider === "gemini"     → returns the fixed prebuilt voice list (free, no key)
+// provider === "elevenlabs" → fetches the account's voices via the API key
+router.post("/fetch_voices", validateUser, async (req, res) => {
+  try {
+    const { apiKey, provider = "gemini" } = req.body;
+
+    if (provider === "elevenlabs") {
+      // Fall back to the server's ELEVENLABS_API_KEY so the user doesn't have to
+      // re-type a key that's already configured in .env.
+      const key = apiKey || process.env.ELEVENLABS_API_KEY;
+      if (!key) {
+        return res.json({ success: false, msg: "No ElevenLabs API key configured. Add ELEVENLABS_API_KEY in .env or enter one." });
+      }
+      const voicesDataa = await getElevenLabsVoices({ apiKeys: key });
+      return res.json(voicesDataa);
+    }
+
+    // Default: Gemini free voices (no key required just to list them).
+    const voices = GEMINI_VOICES.map((name) => ({ voice_id: name, name }));
+    return res.json({ success: true, voices });
+  } catch (err) {
+    res.json({ success: false, msg: "something went wrong", err: err.message });
+    console.log(err);
+  }
+});
+
 // get call logs
 router.get("/call_logs", validateUser, async (req, res) => {
   try {
-    const data = await query(`SELECT * FROM wa_call_logs WHERE uid = ?`, [
-      req.decode.uid,
-    ]);
+    const rows = await query(
+      `SELECT * FROM wa_call_logs WHERE uid = ? ORDER BY id DESC`,
+      [req.decode.uid],
+    );
+
+    // Parse the `data` JSON blob so the frontend gets structured fields
+    // (transcript = what the customer said + the AI's replies, flow_id, recordingUrl).
+    const data = rows.map((row) => {
+      let parsed = {};
+      try {
+        parsed = row.data ? JSON.parse(row.data) : {};
+      } catch {
+        parsed = {};
+      }
+      return {
+        ...row,
+        transcript: Array.isArray(parsed.transcript) ? parsed.transcript : [],
+        flow_id: parsed.flow_id || row.flow_id || null,
+        recordingUrl: parsed.recordingUrl || null,
+        errorMessage: parsed.error || null,
+      };
+    });
+
     res.json({ data, success: true });
   } catch (err) {
     res.json({ success: false, msg: "something went wrong", err });
@@ -730,5 +822,341 @@ router.post(
     }
   },
 );
+
+// ═════════════════════════════════════════════════════════════════════════════
+// LEAD AUTO-CALL  (leads from ad campaigns → auto WhatsApp AI call)
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ── Settings: get (also returns the webhook URL to paste into ad forms) ────────
+router.get("/lead/settings", validateUser, checkPlan, checkWaCall, async (req, res) => {
+  try {
+    const settings = await leadStore.getSettings(req.decode.uid);
+    res.json({ success: true, data: settings });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong", err: err.message });
+  }
+});
+
+// ── Settings: update (auto_call toggle, flow, permission text, sheet config) ───
+router.post("/lead/settings", validateUser, checkPlan, checkWaCall, async (req, res) => {
+  try {
+    const {
+      auto_call,
+      flow_id,
+      permission_text,
+      sheet_enabled,
+      sheet_url,
+      sheet_poll_minutes,
+      voice_provider,
+      eleven_api_key,
+      gemini_api_key,
+      openrouter_api_key,
+      openrouter_model,
+      default_voice_id,
+      default_language,
+    } = req.body;
+
+    const patch = {};
+    if (auto_call !== undefined) patch.auto_call = auto_call ? 1 : 0;
+    if (flow_id !== undefined) patch.flow_id = flow_id || null;
+    if (permission_text !== undefined) patch.permission_text = permission_text || null;
+    if (sheet_enabled !== undefined) patch.sheet_enabled = sheet_enabled ? 1 : 0;
+    if (sheet_url !== undefined) patch.sheet_url = sheet_url || null;
+    if (sheet_poll_minutes !== undefined)
+      patch.sheet_poll_minutes = Math.max(1, parseInt(sheet_poll_minutes) || 5);
+    // Global AI-calling keys — saved once, used by every flow.
+    if (voice_provider !== undefined) patch.voice_provider = voice_provider || null;
+    if (eleven_api_key !== undefined) patch.eleven_api_key = eleven_api_key || null;
+    if (gemini_api_key !== undefined) patch.gemini_api_key = gemini_api_key || null;
+    if (openrouter_api_key !== undefined) patch.openrouter_api_key = openrouter_api_key || null;
+    if (openrouter_model !== undefined) patch.openrouter_model = openrouter_model || null;
+    if (default_voice_id !== undefined) patch.default_voice_id = default_voice_id || null;
+    if (default_language !== undefined) patch.default_language = default_language || null;
+
+    const settings = await leadStore.updateSettings(req.decode.uid, patch);
+    res.json({ success: true, msg: "Settings saved", data: settings });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong", err: err.message });
+  }
+});
+
+// ── Settings: regenerate webhook token (rotate the public URL) ─────────────────
+router.post("/lead/regen_token", validateUser, checkPlan, checkWaCall, async (req, res) => {
+  try {
+    const token = await leadStore.regenerateToken(req.decode.uid);
+    res.json({ success: true, token });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong", err: err.message });
+  }
+});
+
+// ── List leads ─────────────────────────────────────────────────────────────────
+router.get("/lead/list", validateUser, checkPlan, checkWaCall, async (req, res) => {
+  try {
+    const data = await leadStore.listLeads(req.decode.uid);
+    res.json({ success: true, data });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong", err: err.message });
+  }
+});
+
+// ── Add a single lead manually (optionally auto-call) ──────────────────────────
+router.post("/lead/add", validateUser, checkPlan, checkWaCall, async (req, res) => {
+  try {
+    const { name, mobile, email, extra } = req.body;
+    if (!mobile) return res.json({ success: false, msg: "Mobile is required" });
+
+    const { lead, isNew } = await leadStore.insertLead(req.decode.uid, {
+      name,
+      mobile,
+      email,
+      source: "manual",
+      extra,
+    });
+    if (!lead) return res.json({ success: false, msg: "Invalid mobile number" });
+    if (!isNew) return res.json({ success: false, msg: "Lead with this mobile already exists" });
+
+    // Fire auto-call if enabled.
+    leadCaller.onNewLead(req.decode.uid, lead).catch(() => {});
+    res.json({ success: true, msg: "Lead added", data: lead });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong", err: err.message });
+  }
+});
+
+// ── Bulk upload leads from CSV file ────────────────────────────────────────────
+// Field name: "file". Recognized columns (case-insensitive): name, mobile/phone,
+// email; all other columns are stored in each lead's `extra`.
+router.post("/lead/upload", validateUser, checkPlan, checkWaCall, async (req, res) => {
+  try {
+    if (!req.files || !req.files.file) {
+      return res.json({ success: false, msg: "No file uploaded" });
+    }
+    const file = req.files.file;
+    const name = (file.name || "").toLowerCase();
+    if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+      return res.json({
+        success: false,
+        msg: "Excel detected. Please save the sheet as CSV (File → Save As → CSV) and upload that. CSV import is fully supported.",
+      });
+    }
+
+    const rows = await parseCsvBuffer(file.data);
+    if (!rows.length) return res.json({ success: false, msg: "CSV appears empty or invalid" });
+
+    let added = 0;
+    let skipped = 0;
+    for (const row of rows) {
+      const mobile = pickField(row, [
+        "mobile", "phone", "number", "phone number", "contact", "whatsapp",
+      ]);
+      if (!mobile) {
+        skipped += 1;
+        continue;
+      }
+      const leadName = pickField(row, ["name", "full name", "fullname", "first name"]);
+      const email = pickField(row, ["email", "e-mail", "mail"]);
+      const { lead, isNew } = await leadStore.insertLead(req.decode.uid, {
+        name: leadName,
+        mobile,
+        email,
+        source: "upload",
+        extra: row,
+      });
+      if (isNew && lead) {
+        added += 1;
+        leadCaller.onNewLead(req.decode.uid, lead).catch(() => {});
+      } else {
+        skipped += 1;
+      }
+    }
+
+    res.json({ success: true, msg: `Imported ${added} lead(s), skipped ${skipped}`, added, skipped });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong", err: err.message });
+  }
+});
+
+// ── Manually (re)trigger a call for one lead ───────────────────────────────────
+router.post("/lead/call", validateUser, checkPlan, checkWaCall, async (req, res) => {
+  try {
+    const { id } = req.body;
+    const lead = await leadStore.getLead(id);
+    if (!lead || lead.uid !== req.decode.uid) {
+      return res.json({ success: false, msg: "Lead not found" });
+    }
+    const result = await leadCaller.triggerCallForLead(req.decode.uid, lead);
+    if (result.started) {
+      const msg = result.direct
+        ? "Permission already granted — placing the call now."
+        : result.waiting
+          ? "This person was asked recently. Waiting for them to tap Allow (Meta limits repeat requests)."
+          : "Call started — sending WhatsApp permission request. The AI calls once they tap Allow.";
+      res.json({ success: true, msg });
+    } else {
+      const reasons = {
+        no_flow: "Select a valid call flow in settings first.",
+        no_meta_api: "Configure META API in Profile first.",
+        no_mobile: "Lead has no valid mobile number.",
+        in_flight: "A call for this lead is already in progress. Wait a moment or restart, then retry.",
+        send_failed: result.error
+          ? `WhatsApp couldn't send the call request: ${result.error}`
+          : "WhatsApp couldn't send the call-permission request. Check META API + that Calling is enabled on your number.",
+      };
+      res.json({ success: false, msg: reasons[result.reason] || `Could not start call: ${result.error || result.reason}` });
+    }
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong", err: err.message });
+  }
+});
+
+// ── Delete a lead ──────────────────────────────────────────────────────────────
+router.post("/lead/delete", validateUser, checkPlan, checkWaCall, async (req, res) => {
+  try {
+    const { id } = req.body;
+    await leadStore.deleteLead(req.decode.uid, id);
+    res.json({ success: true, msg: "Lead deleted" });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong", err: err.message });
+  }
+});
+
+// ── Export leads as CSV (opens directly in Excel) ──────────────────────────────
+router.get("/lead/export", validateUser, checkPlan, checkWaCall, async (req, res) => {
+  try {
+    const leads = await leadStore.listLeads(req.decode.uid);
+    const header = [
+      "Name", "Mobile", "Email", "Source", "Status",
+      "Permission", "Call Status", "Duration (s)", "Created", "Transcript",
+    ];
+    const lines = [header.map(csvCell).join(",")];
+    for (const l of leads) {
+      const transcriptText = (l.transcript || [])
+        .map((t) => `${t.role || t.speaker || ""}: ${t.text || t.message || ""}`)
+        .join(" | ");
+      lines.push(
+        [
+          l.name, l.mobile, l.email, l.source, l.status,
+          l.permission_status, l.call_status, l.call_duration,
+          l.createdAt, transcriptText,
+        ].map(csvCell).join(","),
+      );
+    }
+    const out = lines.join("\r\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="leads.csv"');
+    res.send(out);
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong", err: err.message });
+  }
+});
+
+// ── Test a Google Sheet URL (reports rows/columns or the exact problem) ────────
+router.post("/lead/sheet_test", validateUser, checkPlan, checkWaCall, async (req, res) => {
+  try {
+    const { sheet_url } = req.body;
+    const url = sheet_url || (await leadStore.getSettings(req.decode.uid)).sheet_url;
+    if (!url) return res.json({ success: false, msg: "No sheet URL to test" });
+    const result = await sheetPoller.testSheet(url);
+    res.json({ success: result.ok, ...result });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong", err: err.message });
+  }
+});
+
+// ── Import sheet rows right now (don't wait for the 60s poller) ────────────────
+// Body: { from_start } — when true, resets sheet_last_row to 0 so ALL current
+// rows are (re)imported. Otherwise only rows after sheet_last_row are imported.
+router.post("/lead/sheet_import_now", validateUser, checkPlan, checkWaCall, async (req, res) => {
+  try {
+    const uid = req.decode.uid;
+    const { from_start } = req.body;
+    let settings = await leadStore.getSettings(uid);
+    if (!settings.sheet_url) return res.json({ success: false, msg: "No sheet URL configured" });
+
+    // Verify readable first so we can return a helpful error.
+    const test = await sheetPoller.testSheet(settings.sheet_url);
+    if (!test.ok) return res.json({ success: false, msg: test.msg });
+
+    // Detection is now content-based (dedupe by phone), so from_start is a
+    // no-op kept for UI compatibility — every fetch scans all rows and imports
+    // only phone numbers not already in the leads table.
+    const result = await sheetPoller.pollUserSheet(settings);
+    const imported = result?.imported || 0;
+
+    res.json({
+      success: true,
+      imported,
+      msg: imported > 0
+        ? `Imported ${imported} new lead(s) from the sheet.`
+        : `No new leads found (all ${result?.seen || 0} row(s) are already in your leads list). Add a new row with a new phone number to trigger a call.`,
+    });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong", err: err.message });
+  }
+});
+
+// ── PUBLIC webhook: ad forms / Zapier / Make POST leads here (no auth) ──────────
+// URL: POST /api/wa_call/lead_hook/:uid/:token
+// Body: flexible JSON. We look for name/phone/email in common shapes, including
+// Meta Lead Ads `field_data` arrays. Everything else is kept in `extra`.
+router.post("/lead_hook/:uid/:token", async (req, res) => {
+  try {
+    const { uid, token } = req.params;
+    const settings = await leadStore.getSettingsByToken(uid, token);
+    if (!settings) {
+      return res.status(403).json({ success: false, msg: "Invalid webhook token" });
+    }
+
+    const body = req.body || {};
+
+    // Flatten Meta Lead Ads style: { field_data: [{ name, values:[...] }, ...] }
+    let flat = { ...body };
+    if (Array.isArray(body.field_data)) {
+      for (const f of body.field_data) {
+        const key = (f.name || f.key || "").toLowerCase();
+        const val = Array.isArray(f.values) ? f.values[0] : f.value;
+        if (key) flat[key] = val;
+      }
+    }
+
+    const mobile = pickField(flat, [
+      "mobile", "phone", "number", "phone_number", "phone number", "contact", "whatsapp",
+    ]);
+    if (!mobile) {
+      return res.json({ success: false, msg: "No phone/mobile field found in payload" });
+    }
+    const name = pickField(flat, ["name", "full_name", "full name", "fullname", "first_name"]);
+    const email = pickField(flat, ["email", "e-mail", "mail"]);
+
+    const { lead, isNew } = await leadStore.insertLead(uid, {
+      name,
+      mobile,
+      email,
+      source: "webhook",
+      extra: flat,
+    });
+
+    if (isNew && lead) {
+      leadCaller.onNewLead(uid, lead).catch(() => {});
+    }
+
+    res.json({ success: true, isNew, msg: isNew ? "Lead captured" : "Duplicate lead ignored" });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong", err: err.message });
+  }
+});
 
 module.exports = router;

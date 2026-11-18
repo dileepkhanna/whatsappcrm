@@ -725,6 +725,13 @@ router.post("/add_page", adminValidator, async (req, res) => {
       return res.json({ success: false, msg: "Title and slug are required" });
     }
 
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)) {
+      return res.json({
+        success: false,
+        msg: "Slug can only contain lowercase letters, numbers and single dashes (e.g. about-us).",
+      });
+    }
+
     // Reserved slugs (only for contact-form)
     const reservedSlugs = ["contact-form"];
 
@@ -753,12 +760,14 @@ router.post("/add_page", adminValidator, async (req, res) => {
 
       filename = `${randomString}.${getFileExtension(file.name)}`;
 
-      file.mv(`${__dirname}/../client/public/media/${filename}`, (err) => {
-        if (err) {
-          console.log(err);
-          return res.json({ success: false, msg: "Failed to upload image" });
-        }
-      });
+      // Wait for the move so a failure doesn't send a second response
+      // and the page isn't saved pointing at a missing image.
+      try {
+        await file.mv(`${__dirname}/../client/public/media/${filename}`);
+      } catch (mvErr) {
+        console.log(mvErr);
+        return res.json({ success: false, msg: "Failed to upload image" });
+      }
     }
 
     await query(

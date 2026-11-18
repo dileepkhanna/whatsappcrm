@@ -1,0 +1,1 @@
+var e=e=>{if(e?.data&&e.data.success===!1)throw Error(e.data.msg||`Request failed`);return e},t=(e,t)=>e?.response?.data?.msg||e?.message||t,n=e=>e===`privacy-policy`||e===`terms-and-conditions`?`/${e}`:`/page/${e}`;export{t as n,n as r,e as t};

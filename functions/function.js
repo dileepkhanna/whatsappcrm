@@ -3877,13 +3877,136 @@ function serializeNodeSchema(nodeSchemas) {
       dataFields: { agentId: "string — optional specific agent ID" },
     },
     {
-      nodeType: "aiTransfer",
-      description: "Hand the conversation off to an AI assistant (PRO feature).",
+      nodeType: "buttons",
+      description:
+        "Send up to 3 tappable reply buttons and WAIT for the customer to tap one. Each button is its own output: connect an edge with sourceHandle = that button's id. Optional handle 'invalid' is used after repeated wrong replies.",
+      moveToNextNode: false,
+      dataFields: {
+        body: "string — question text (required, max 1024 chars)",
+        header: "string — optional header (max 60)",
+        footer: "string — optional footer (max 60)",
+        buttons: "array of { id: string (short unique, e.g. 'btn_loan'), title: string (max 20 chars) } — 1 to 3 items",
+        variableName: "string — optional variable to save the chosen title into",
+      },
+    },
+    {
+      nodeType: "list",
+      description:
+        "Send a list menu (up to 10 rows) and WAIT for the customer to pick one. Each row is its own output: sourceHandle = that row's id. Use instead of buttons when there are more than 3 options.",
+      moveToNextNode: false,
+      dataFields: {
+        body: "string — question text (required)",
+        buttonText: "string — label of the menu button (max 20), e.g. 'View options'",
+        sectionTitle: "string — section heading (max 24)",
+        rows: "array of { id: string (short unique), title: string (max 24), description: string (optional, max 72) } — 1 to 10 items",
+        variableName: "string — optional variable to save the chosen title into",
+      },
+    },
+    {
+      nodeType: "inputName",
+      description:
+        "Ask for the customer's name, validate it, re-ask if invalid, save it. Handles: 'valid' (continue) and optional 'invalid'. Replaces message+responseSaver for names.",
+      moveToNextNode: false,
+      dataFields: {
+        question: "string — the question to ask",
+        variableName: "string — variable to save into (letters, digits, _ only)",
+        errorMessage: "string — optional retry message",
+      },
+    },
+    {
+      nodeType: "inputEmail",
+      description: "Ask for and validate an email address. Handles 'valid' / 'invalid'.",
+      moveToNextNode: false,
+      dataFields: { question: "string", variableName: "string", errorMessage: "string — optional" },
+    },
+    {
+      nodeType: "inputPhone",
+      description: "Ask for and validate a phone number (10-15 digits). Handles 'valid' / 'invalid'.",
+      moveToNextNode: false,
+      dataFields: {
+        question: "string",
+        variableName: "string",
+        defaultCountryCode: "string — e.g. '91', added to 10-digit numbers",
+      },
+    },
+    {
+      nodeType: "inputNumber",
+      description: "Ask for and validate a number (e.g. amount, age). Handles 'valid' / 'invalid'.",
+      moveToNextNode: false,
+      dataFields: {
+        question: "string",
+        variableName: "string",
+        min: "number — optional minimum",
+        max: "number — optional maximum",
+      },
+    },
+    {
+      nodeType: "inputDate",
+      description: "Ask for and validate a date (DD/MM/YYYY). Handles 'valid' / 'invalid'.",
+      moveToNextNode: false,
+      dataFields: {
+        question: "string",
+        variableName: "string",
+        dateRule: "string — '' | 'future' | 'past'",
+      },
+    },
+    {
+      nodeType: "switch",
+      description:
+        "Route to one of many branches based on the reply or a saved variable. Each case is an output with sourceHandle = case id; 'default' handle when nothing matches. Continues immediately.",
       moveToNextNode: true,
+      dataFields: {
+        source: "string — 'reply' | 'variable'",
+        variable: "string — variable name when source is 'variable'",
+        cases: "array of { id: string, matchType: 'equals'|'contains'|'starts_with'|'ends_with'|'greater_than'|'less_than', value: string }",
+      },
+    },
+    {
+      nodeType: "randomSplit",
+      description: "Send contacts down a random branch by weight (A/B test). sourceHandle = branch id.",
+      moveToNextNode: true,
+      dataFields: { branches: "array of { id: string, label: string, weight: number }" },
+    },
+    {
+      nodeType: "media",
+      description: "Send an image, video, audio or document from a public URL.",
+      moveToNextNode: true,
+      dataFields: {
+        mediaType: "string — 'image' | 'video' | 'audio' | 'document'",
+        url: "string — public https URL",
+        caption: "string — optional",
+      },
+    },
+    {
+      nodeType: "aiResponse",
+      description: "Generate one AI reply to the customer's last message using the saved AI key, send it, then continue.",
+      moveToNextNode: true,
+      dataFields: {
+        instructions: "string — what the AI should do / business context",
+        variableName: "string — optional variable to save the reply",
+      },
+    },
+    {
+      nodeType: "updateContact",
+      description: "Save collected details to the contact (name and var1-var5 accept {{variables}}). Continues immediately.",
+      moveToNextNode: true,
+      dataFields: {
+        name: "string — e.g. '{{customer_name}}'",
+        var1: "string — optional, e.g. '{{loan_type}}'",
+        var2: "string — optional",
+      },
+    },
+    {
+      nodeType: "end",
+      description: "End the flow. The next customer message starts the flow again. No outgoing edges.",
+      moveToNextNode: false,
       dataFields: {},
     },
   ];
 }
+
+const AI_NODE_TYPE_LIST =
+  "initial | message | buttons | list | media | responseSaver | inputName | inputEmail | inputPhone | inputNumber | inputDate | condition | switch | randomSplit | delay | chatLabels | updateContact | agentTransfer | disableAutoReply | httpRequest | aiResponse | resetSession | end";
 
 function buildSystemPrompt(nodeSchemas) {
   const schemaStr = JSON.stringify(serializeNodeSchema(nodeSchemas), null, 2);
@@ -3918,8 +4041,20 @@ Return ONLY raw JSON — no markdown fences, no explanation:
    First edge must go FROM "initialNode".
 
 2. Use ONLY these exact type strings (case-sensitive, lowercase camelCase):
-   initial | message | responseSaver | condition | delay | chatLabels |
-   disableAutoReply | resetSession | httpRequest | agentTransfer | aiTransfer
+   ${AI_NODE_TYPE_LIST}
+
+2b. OPTIONS / MENUS: whenever the customer should pick from choices, use a "buttons" node
+   (1-3 choices, titles max 20 chars) or a "list" node (4-10 choices, titles max 24 chars).
+   NEVER put choices as plain text in a "message" node.
+   Give each option a short unique id and connect ONE edge per option from that node with
+   "sourceHandle": "<option id>". Every option must lead somewhere.
+   Example option edge: { "id": "e_menu_loan", "source": "menu_main", "target": "ask_amount", "sourceHandle": "btn_loan", "type": "smoothstep", "animated": false }
+
+2c. TYPED QUESTIONS: to collect a name, email, phone, number or date, use inputName / inputEmail /
+   inputPhone / inputNumber / inputDate (they validate and re-ask). Connect the next step with
+   "sourceHandle": "valid". Use message + responseSaver only for free-text answers.
+
+2d. Every node except "end" must have an outgoing edge. Finish flows with an "end" node or "agentTransfer".
 
 3. Collecting user input: use a "message" node (moveToNextNode omitted = waits for reply),
    then a "responseSaver" node to save the answer.
@@ -3953,7 +4088,12 @@ For "Ask name, save it, then say hello":
 ${schemaStr}
 
 ## FLOW PATTERNS
-- Ask question + save reply:  message → responseSaver → next
+- Menu of choices:            buttons (≤3) or list (≤10), one edge per option id
+- Ask name/email/phone/number/date: inputName/inputEmail/inputPhone/inputNumber/inputDate → (sourceHandle "valid") → next
+- Ask free-text + save reply: message → responseSaver → next
+- Save details to contact:    updateContact (name: "{{customer_name}}")
+- Many-way branch:            switch (case ids + "default")
+- Finish:                     end
 - Branch on value:            condition (sourceHandle "a" = match, "b" = default)
 - Pause N seconds:            delay
 - Hand to human:              disableAutoReply OR agentTransfer
@@ -3975,7 +4115,8 @@ Return the COMPLETE updated { nodes, edges } JSON.
 - Keep all existing nodes/edges unless the instruction says to remove them.
 - Maintain existing node IDs where possible.
 - Only change what the instruction asks for.
-- MUST use only these exact type strings: initial | message | responseSaver | condition | delay | chatLabels | disableAutoReply | resetSession | httpRequest | agentTransfer | aiTransfer`;
+- MUST use only these exact type strings: ${AI_NODE_TYPE_LIST}
+- Choices must use "buttons" or "list" nodes with one edge per option id (sourceHandle = option id).`;
   }
 
   return `Create a new WhatsApp chatbot flow for this use case:
@@ -3983,10 +4124,12 @@ Return the COMPLETE updated { nodes, edges } JSON.
 "${instruction}"
 
 Requirements:
-- Use ONLY these node types (exact lowercase camelCase): initial | message | responseSaver | condition | delay | chatLabels | disableAutoReply | resetSession | httpRequest | agentTransfer | aiTransfer
+- Use ONLY these node types (exact lowercase camelCase): ${AI_NODE_TYPE_LIST}
 - Always start with initialNode (type: "initial")
-- To ask a question and wait for reply: use "message" node
-- To save the user's reply into a variable: use "responseSaver" node immediately after
+- For choices use "buttons" (≤3, titles ≤20 chars) or "list" (≤10, titles ≤24 chars); one edge per option with sourceHandle = option id
+- For name/email/phone/number/date use inputName/inputEmail/inputPhone/inputNumber/inputDate, next edge sourceHandle "valid"
+- For other free-text questions: "message" node, then "responseSaver" immediately after
+- Every node except "end" needs an outgoing edge
 - To branch based on a value: use "condition" node with sourceHandle "a" (match) and "b" (default)
 - Use {{variableName}} syntax in message text to reference saved variables
 - Return ONLY raw JSON: { "nodes": [...], "edges": [...] }`;
@@ -4058,27 +4201,43 @@ async function callDeepSeek(apiKey, model, systemPrompt, userPrompt) {
 }
 
 async function callOpenRouter(apiKey, model, systemPrompt, userPrompt) {
-  const response = await axios.post(
-    "https://openrouter.ai/api/v1/chat/completions",
-    {
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user",   content: userPrompt   },
-      ],
-      temperature: 0.3,
-      max_tokens: 8000,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://whatscrm.app",
-        "X-Title": "WhatsCRM AI Flow Builder",
+  let response;
+  try {
+    response = await axios.post(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user",   content: userPrompt   },
+        ],
+        temperature: 0.3,
+        max_tokens: 8000,
       },
-      timeout: 120000,   // 2 minutes — free models can be slow
-    },
-  );
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://whatscrm.app",
+          "X-Title": "WhatsCRM AI Flow Builder",
+        },
+        timeout: 120000,   // 2 minutes — free models can be slow
+      },
+    );
+  } catch (axiosErr) {
+    // Axios throws on 4xx/5xx. Convert to a clean message so the route's
+    // catch can return JSON instead of propagating a raw 502.
+    const status = axiosErr.response?.status;
+    const body = axiosErr.response?.data;
+    const bodyMsg = typeof body === "string"
+      ? body.slice(0, 300)
+      : (body?.error?.message || body?.message || JSON.stringify(body || {}).slice(0, 300));
+    if (status === 401) throw new Error("Invalid OpenRouter API key. Check the key on the Lead Auto-Call page.");
+    if (status === 402) throw new Error("OpenRouter credits exhausted. Add credits at openrouter.ai.");
+    if (status === 429) throw new Error("OpenRouter rate limit hit. Wait a minute and try again, or switch to a different model.");
+    if (status === 502 || status === 503) throw new Error("OpenRouter is temporarily unavailable (502/503). Try again in a moment.");
+    throw new Error(`OpenRouter request failed (${status || axiosErr.code}): ${bodyMsg}`);
+  }
 
   // OpenRouter returns errors inside the 200 response body
   if (response.data?.error) {
@@ -4086,11 +4245,13 @@ async function callOpenRouter(apiKey, model, systemPrompt, userPrompt) {
     const hint = err.code === 404
       ? " The model slug may be wrong or the free tier has been removed."
       : err.code === 429
-      ? " This free model is rate-limited. Try 'openrouter/free' or a different model."
+      ? " This free model is rate-limited. Try 'google/gemini-2.0-flash-exp:free' or a different model."
       : err.code === 400 && err.message?.includes("rerank")
       ? " This is a rerank model, not a chat model. Choose a different model."
       : err.code === 400 && err.message?.includes("embedding")
       ? " This is an embedding model, not a chat model. Choose a different model."
+      : err.message?.includes("decisions")
+      ? " This is a decisions model, not a chat model. Choose 'google/gemini-2.0-flash-exp:free'."
       : "";
     throw new Error((err.message || "OpenRouter error") + hint);
   }
@@ -4458,3 +4619,4 @@ module.exports = {
   handleWAFormSubmission,
   patchIndexHtml,
 };
+

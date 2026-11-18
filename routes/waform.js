@@ -4,24 +4,12 @@ const validateUser = require("../middlewares/user.js");
 const { checkPlan, checkWaForms } = require("../middlewares/plan.js");
 const axios = require("axios");
 const FormData = require("form-data");
+// Shared phone normalizer — the single source of truth used by every path that
+// builds a chat_id / sender_mobile, so outgoing forms and inbound webhook
+// replies always map to the SAME chat (no 9949512262 vs 919949512262 dupes).
+const { normalizePhone } = require("../functions/phone.js");
 
 const API_VERSION = "v25.0";
-
-// ─── HELPER ───────────────────────────────────────────────────────────────────
-// Default country code applied when a number has no country code. India = 91.
-const DEFAULT_COUNTRY_CODE = "91";
-
-// Normalize a phone number to digits only and default bare 10-digit numbers to India.
-// e.g. "+91 99948318650" -> "9199948318650", "9948318650" -> "919948318650".
-// This MUST match the incoming inbox pipeline (extractPhoneNumber) so that outgoing
-// and incoming messages map to the SAME chat_id and we don't create duplicate chats.
-function normalizePhone(num) {
-  let digits = String(num || "").replace(/\D/g, "");
-  if (digits.length === 10) {
-    digits = DEFAULT_COUNTRY_CODE + digits;
-  }
-  return digits;
-}
 
 async function getMetaConfig(uid) {
   const [metaApi] = await query(`SELECT * FROM meta_api WHERE uid = ?`, [uid]);

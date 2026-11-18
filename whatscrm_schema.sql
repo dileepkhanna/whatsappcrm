@@ -903,6 +903,9 @@ CREATE TABLE IF NOT EXISTS `wa_call_broadcasts` (
   `flow_id` varchar(255) DEFAULT NULL,
   `status` varchar(50) DEFAULT 'pending',
   `total_contacts` int(11) DEFAULT 0,
+  `contacts` longtext DEFAULT NULL,
+  `call_delay` int(11) DEFAULT 5000,
+  `meta_data` longtext DEFAULT NULL,
   `logs` longtext DEFAULT NULL,
   `started_at` datetime DEFAULT NULL,
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
@@ -923,6 +926,50 @@ CREATE TABLE IF NOT EXISTS `wa_call_logs` (
   `data` longtext DEFAULT NULL,
   `createdAt` datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ----------------------------
+-- wa_call_leads  (Lead Auto-Call: leads captured from ad campaigns)
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `wa_call_leads` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `uid` varchar(255) NOT NULL,
+  `name` varchar(255) DEFAULT NULL,
+  `mobile` varchar(50) DEFAULT NULL,
+  `email` varchar(255) DEFAULT NULL,
+  `source` varchar(100) DEFAULT NULL,
+  `extra` longtext DEFAULT NULL,
+  `status` varchar(50) DEFAULT 'new',
+  `permission_status` varchar(50) DEFAULT 'pending',
+  `call_id` varchar(255) DEFAULT NULL,
+  `call_status` varchar(50) DEFAULT 'pending',
+  `call_duration` int(11) DEFAULT NULL,
+  `transcript` longtext DEFAULT NULL,
+  `error_message` text DEFAULT NULL,
+  `called_at` datetime DEFAULT NULL,
+  `createdAt` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_uid` (`uid`),
+  KEY `idx_uid_mobile` (`uid`, `mobile`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ----------------------------
+-- wa_call_lead_settings  (per-user auto-call config + webhook token)
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `wa_call_lead_settings` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `uid` varchar(255) NOT NULL,
+  `auto_call` tinyint(1) DEFAULT 0,
+  `flow_id` varchar(255) DEFAULT NULL,
+  `permission_text` text DEFAULT NULL,
+  `webhook_token` varchar(255) DEFAULT NULL,
+  `sheet_enabled` tinyint(1) DEFAULT 0,
+  `sheet_url` text DEFAULT NULL,
+  `sheet_last_row` int(11) DEFAULT 0,
+  `sheet_poll_minutes` int(11) DEFAULT 5,
+  `createdAt` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_uid` (`uid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET FOREIGN_KEY_CHECKS = 1;

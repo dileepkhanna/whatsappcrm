@@ -2833,13 +2833,84 @@ router.post("/del_task_for_agent", validateUser, async (req, res) => {
   }
 });
 
+// Live-chat widget settings (columns added by routes/widget.js on startup).
+const widgetColumnsReady = async () => {
+  try {
+    const cols = await query(`SHOW COLUMNS FROM chat_widget LIKE 'mode'`);
+    if (!cols.length) require("./widget.js"); // loads + runs the migration
+  } catch {}
+};
+
+async function readWidgetLiveFields(body, uid) {
+  const mode = body.mode === "live" ? "live" : "whatsapp";
+  const str = (v, max) => String(v ?? "").trim().slice(0, max);
+  let flow_id = str(body.flow_id, 255) || null;
+  if (mode === "live" && flow_id) {
+    const [flow] = await query(`SELECT flow_id FROM beta_flows WHERE flow_id = ? AND uid = ? AND source = 'wa_chatbot'`, [flow_id, uid]);
+    if (!flow) return { error: "Selected chatbot flow was not found" };
+  }
+  const color = str(body.theme_color, 20);
+  return {
+    mode,
+    flow_id: mode === "live" ? flow_id : null,
+    theme_color: /^#[0-9a-f]{3,8}$/i.test(color) ? color : "#008069",
+    welcome_msg: str(body.welcome_msg, 1000) || null,
+    bot_name: str(body.bot_name, 100) || null,
+    start_text: str(body.start_text, 100) || null,
+    ask_details: body.ask_details === true || body.ask_details === "true" || body.ask_details === 1 ? 1 : 0,
+  };
+}
+
+// update widget (title / number / position / size / live-chat settings)
+router.post("/update_widget", validateUser, checkPlan, checkChatWidget, async (req, res) => {
+  try {
+    const { id, title, whatsapp_number, place, size } = req.body;
+    const [w] = await query(`SELECT * FROM chat_widget WHERE id = ? AND uid = ?`, [id, req.decode.uid]);
+    if (!w) return res.json({ success: false, msg: "Widget not found" });
+    const live = await readWidgetLiveFields(req.body, req.decode.uid);
+    if (live.error) return res.json({ success: false, msg: live.error });
+    if (!title || !place || (live.mode !== "live" && !whatsapp_number)) {
+      return res.json({ success: false, msg: "Please fill the details" });
+    }
+    await widgetColumnsReady();
+    await query(
+      `UPDATE chat_widget SET title = ?, whatsapp_number = ?, place = ?, size = ?,
+        mode = ?, flow_id = ?, theme_color = ?, welcome_msg = ?, bot_name = ?, start_text = ?, ask_details = ?
+       WHERE id = ? AND uid = ?`,
+      [
+        title,
+        whatsapp_number || "",
+        place,
+        size || w.size,
+        live.mode,
+        live.flow_id,
+        live.theme_color,
+        live.welcome_msg,
+        live.bot_name,
+        live.start_text,
+        live.ask_details,
+        id,
+        req.decode.uid,
+      ],
+    );
+    res.json({ success: true, msg: "Widget was updated" });
+  } catch (err) {
+    console.log(err);
+    res.json({ success: false, msg: "something went wrong" });
+  }
+});
+
 // add widget
 router.post("/add_widget", validateUser, checkPlan, checkChatWidget, async (req, res) => {
   try {
     const { title, whatsapp_number, place, selectedIcon, logoType, size } =
       req.body;
 
-    if (!title || !whatsapp_number || !place) {
+    const live = await readWidgetLiveFields(req.body, req.decode.uid);
+    if (live.error) return res.json({ success: false, msg: live.error });
+
+    // Click-to-chat needs a number; live chat works without one.
+    if (!title || !place || (live.mode !== "live" && !whatsapp_number)) {
       return res.json({ msg: "Please fill the details" });
     }
 
@@ -2867,16 +2938,26 @@ router.post("/add_widget", validateUser, checkPlan, checkChatWidget, async (req,
 
     const unique_id = randomstring.generate(10);
 
+    await widgetColumnsReady();
     await query(
-      `INSERT INTO chat_widget (unique_id, uid, title, whatsapp_number, logo, place, size) VALUES (?,?,?,?,?,?,?)`,
+      `INSERT INTO chat_widget (unique_id, uid, title, whatsapp_number, logo, place, size,
+        mode, flow_id, theme_color, welcome_msg, bot_name, start_text, ask_details)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         unique_id,
         req.decode.uid,
         title,
-        whatsapp_number,
+        whatsapp_number || "",
         filename,
         place,
         size || 50,
+        live.mode,
+        live.flow_id,
+        live.theme_color,
+        live.welcome_msg,
+        live.bot_name,
+        live.start_text,
+        live.ask_details,
       ],
     );
 
@@ -2909,7 +2990,7 @@ router.post("/del_widget", validateUser, checkPlan, checkChatWidget, async (req,
   try {
     const { id } = req.body;
 
-    await query(`DELETE FROM chat_widget WHERE id = ?`, [id]);
+    await query(`DELETE FROM chat_widget WHERE id = ? AND uid = ?`, [id, req.decode.uid]);
 
     res.json({ msg: "Widget was deleted", success: true });
   } catch (err) {
@@ -4089,6 +4170,12 @@ router.post("/update_fcm_token", validateUser, async (req, res) => {
   }
 });
 
+// embed_data is informational; the token lives only in meta_api.access_token.
+const embedDataToStore = (data = {}) => {
+  const { token, ...rest } = data || {};
+  return rest;
+};
+
 router.post("/exchange_embed_token", validateUser, async (req, res) => {
   try {
     const { authCode, wabaId, phoneNumId, businessId, isCoexistence } =
@@ -4124,6 +4211,7 @@ router.post("/exchange_embed_token", validateUser, async (req, res) => {
       wabaId,
       phoneNumId,
       businessId,
+      uid: req.decode.uid,
       isCoexistence: isCoexistence === true || isCoexistence === "true", // 🔥 Handle both boolean and string
     });
 
@@ -4140,6 +4228,7 @@ router.post("/exchange_embed_token", validateUser, async (req, res) => {
       const app_id = appId;
       const is_coexistence = genToken?.data?.isCoexistence || false;
       const platform_type = genToken?.data?.platformType || null;
+      const display_phone_number = genToken?.data?.displayPhoneNumber || null;
 
       const findOne = await query(`SELECT * FROM meta_api WHERE uid = ?`, [
         req.decode.uid,
@@ -4155,10 +4244,11 @@ router.post("/exchange_embed_token", validateUser, async (req, res) => {
             business_phone_number_id = ?, 
             app_id = ?, 
             is_coexistence = ?, 
-            platform_type = ? 
+            platform_type = ?,
+            display_phone_number = ?
           WHERE uid = ?`,
           [
-            JSON.stringify(genToken?.data),
+            JSON.stringify(embedDataToStore(genToken?.data)),
             "embed",
             waba_id,
             access_token,
@@ -4166,17 +4256,18 @@ router.post("/exchange_embed_token", validateUser, async (req, res) => {
             app_id,
             is_coexistence ? 1 : 0,
             platform_type,
+            display_phone_number,
             req.decode.uid,
           ],
         );
       } else {
         await query(
           `INSERT INTO meta_api 
-            (uid, embed_data, login_type, waba_id, access_token, business_phone_number_id, app_id, is_coexistence, platform_type) 
-          VALUES (?,?,?,?,?,?,?,?,?)`,
+            (uid, embed_data, login_type, waba_id, access_token, business_phone_number_id, app_id, is_coexistence, platform_type, display_phone_number) 
+          VALUES (?,?,?,?,?,?,?,?,?,?)`,
           [
             req.decode.uid,
-            JSON.stringify(genToken?.data),
+            JSON.stringify(embedDataToStore(genToken?.data)),
             "embed",
             waba_id,
             access_token,
@@ -4184,6 +4275,7 @@ router.post("/exchange_embed_token", validateUser, async (req, res) => {
             app_id,
             is_coexistence ? 1 : 0,
             platform_type,
+            display_phone_number,
           ],
         );
       }
@@ -4209,7 +4301,12 @@ router.post("/exchange_embed_token", validateUser, async (req, res) => {
       }
     }
 
-    res.json(genToken);
+    // Never send the access token back to the browser.
+    res.json({
+      success: !!genToken?.success,
+      msg: genToken?.msg,
+      data: genToken?.success ? embedDataToStore(genToken.data) : undefined,
+    });
   } catch (err) {
     console.error("❌ /exchange_embed_token error:", err);
     res.json({ success: false, msg: "Something went wrong", err: err.message });

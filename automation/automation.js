@@ -1,4 +1,5 @@
 const flowProcessor = require("./functions");
+const extraNodes = require("./nodes");
 const { query } = require("../database/dbpromise");
 
 async function processFlow({
@@ -77,6 +78,22 @@ async function processFlow({
     return console.log("Flow terminated due to infinite loop");
   }
   // ===== LOOP PROTECTION END =====
+
+  // Keyword trigger: a flow whose start node is set to "keyword" only starts
+  // when the message matches. Contacts already inside the flow continue.
+  const allowedToStart = await extraNodes.canStartFlow({
+    nodes,
+    uid,
+    flowId,
+    message,
+    incomingText,
+  });
+  if (!allowedToStart) {
+    return console.log("⏭️ Flow not started: keyword trigger did not match", {
+      flowId,
+      incomingText,
+    });
+  }
 
   let result = { moveToNextNode: false };
   const flowSession = await flowProcessor.getFlowSession({
@@ -180,7 +197,7 @@ async function processFlow({
     console.log(
       "Flow looks incomplete trying to delete session and try again ",
     );
-    if (origin === "qr") {
+    if (origin === "qr" || origin === "webchat") {
       await query(
         `DELETE FROM flow_session WHERE uid = ? AND origin = ? AND origin_id = ? AND flow_id = ? AND sender_mobile = ? LIMIT 1`,
         [uid, origin, sessionId, flowId, message.senderMobile],
@@ -537,6 +554,36 @@ async function processFlow({
     case "SET_CHAT_LABEL":
     case "chatLabels": // ✅ Support camelCase from beta flow builder
       result = await flowProcessor.processSetChatLabel({
+        chatId,
+        message,
+        node,
+        origin,
+        sessionId,
+        user,
+        nodes,
+        edges,
+        flowSession,
+        element,
+        variablesObj,
+        incomingText,
+      });
+      break;
+
+    // New node types (automation/nodes.js)
+    case "media":
+    case "buttons":
+    case "list":
+    case "inputName":
+    case "inputEmail":
+    case "inputPhone":
+    case "inputNumber":
+    case "inputDate":
+    case "switch":
+    case "randomSplit":
+    case "aiResponse":
+    case "updateContact":
+    case "end":
+      result = await extraNodes.processExtraNode({
         chatId,
         message,
         node,

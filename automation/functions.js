@@ -351,11 +351,20 @@ async function pushOrCreateSheet(sheets, spreadsheetId, sheetName, data) {
   }
 }
 
-async function pushSpreadSheet({ authUrl, sheetName, sheetId, jsonData }) {
+async function pushSpreadSheet({ authUrl, credentials, sheetName, sheetId, jsonData }) {
   try {
-    const res = await fetch(authUrl);
-    if (!res.ok) throw new Error("Failed to fetch service account JSON");
-    const credsPath = await res.json();
+    // Service-account JSON pasted into the node, or a URL to it (legacy).
+    let credsPath;
+    if (credentials) {
+      credsPath = typeof credentials === "string" ? JSON.parse(credentials) : credentials;
+    } else {
+      const res = await fetch(authUrl);
+      if (!res.ok) throw new Error("Failed to fetch service account JSON");
+      credsPath = await res.json();
+    }
+    if (!credsPath?.client_email || !credsPath?.private_key) {
+      throw new Error("Service account JSON must contain client_email and private_key");
+    }
 
     const spreadsheetId = sheetId;
 
@@ -830,6 +839,11 @@ async function sendWaMessage({
 
       sendMsgId = result?.id || null;
     }
+    // Website live chat: nothing to deliver over the network. The caller saves
+    // the message to beta_conversation and the website widget polls it.
+    else if (origin === "webchat") {
+      sendMsgId = `wc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
     // QR (Baileys)
     else if (origin === "qr") {
       const {
@@ -956,6 +970,10 @@ async function sendWaMessage({
           uid,
         });
         sendMsgId = send?.id || null;
+        if (!sendMsgId) {
+          // Surface Meta's real rejection reason instead of a bare null.
+          console.error("❌ Meta rejected the message:", send?.msg || send);
+        }
       }
     }
 
@@ -1015,6 +1033,26 @@ async function getActiveFlows({ uid, origin, sessionId, webhook }) {
          WHERE uid = ? AND origin_id = ? AND active = 1`,
         [uid, "META"],
       );
+    } else if (origin?.toLowerCase() === "webchat" && sessionId) {
+      // Website live chat. If the Chatbot section has bots for this widget,
+      // they decide (only the active one replies). Otherwise the flow picked
+      // in the widget's own settings is used.
+      const siteBots = await query(
+        `SELECT flow_id, uid, origin_id, active FROM beta_chatbot
+         WHERE uid = ? AND origin_id = ? AND source = 'wa_chatbot' AND origin LIKE '%"code":"WEBSITE"%'`,
+        [uid, sessionId],
+      );
+      if (siteBots.length) {
+        chatbots = siteBots
+          .filter((b) => Number(b.active) === 1)
+          .map(({ flow_id, uid: u, origin_id }) => ({ flow_id, uid: u, origin_id }));
+      } else {
+        chatbots = await query(
+          `SELECT flow_id, uid, unique_id AS origin_id FROM chat_widget
+           WHERE uid = ? AND unique_id = ? AND mode = 'live' AND flow_id IS NOT NULL AND flow_id != ''`,
+          [uid, sessionId],
+        );
+      }
     }
 
     if (chatbots?.length < 1) {
@@ -1185,6 +1223,15 @@ async function uploadMediaToMeta(mediaUrl, uid) {
     console.error("Error uploading media to Meta:", err);
     return { success: false, error: err.message };
   }
+}
+
+// Action nodes (labels, API request, email, sheets, agent transfer, MySQL)
+// continue to the next connected node unless the node explicitly sets
+// moveToNextNode:false. The builder never sets this flag, so the old
+// `moveToNextNode || false` default made every flow stop after these nodes.
+function shouldContinue(node, defaultValue = true) {
+  const v = node?.data?.moveToNextNode;
+  return v === undefined || v === null ? defaultValue : !!v;
 }
 
 async function processSendMessage({
@@ -1560,8 +1607,21 @@ async function processMakeRequest({
 }) {
   try {
     const { uid } = user;
-    const config = node.data;
+    // Resolve {{var}} and {{{var}}} anywhere in the request config. The
+    // response-mapping list (data.variables) holds paths, not templates, so
+    // keep it untouched.
+    const { variables: responseMap, ...rest } = node.data || {};
+    const config = { ...replaceVariables(rest, variablesObj || {}), variables: responseMap };
+    if (!config.bodyData && typeof config.body === "string" && config.body.trim()) {
+      config.bodyData = { raw: config.body }; // legacy editor field
+    }
+    if (Array.isArray(config.headers)) {
+      config.headers = config.headers.filter((h) => h && h.key);
+    }
     const resp = await makeRequestBeta(config, variablesObj);
+    if (!resp?.success) {
+      console.error(`❌ Make Request ${node.id} failed:`, resp?.msg || resp);
+    }
     let allVars;
 
     if (resp.success) {
@@ -1592,7 +1652,7 @@ async function processMakeRequest({
       [JSON.stringify(newData), element?.flow_id, uid, message?.senderMobile],
     );
 
-    return { moveToNextNode: node?.data?.moveToNextNode || false };
+    return { moveToNextNode: shouldContinue(node) };
   } catch (err) {
     console.log(err);
     return {};
@@ -1691,15 +1751,22 @@ async function processSpreadSheet({
 }) {
   try {
     const { uid } = user;
-    const { authUrl, authLabel, jsonData, sheetName, sheetId } = node.data;
+    const { authUrl, credentials, jsonData, sheetName, sheetId } = node.data;
 
-    if (authUrl && authLabel && jsonData && sheetName && sheetId) {
-      await pushSpreadSheet({
-        authUrl,
-        sheetName,
-        sheetId,
-        jsonData: replaceJsonWithVar(jsonData, variablesObj),
-      });
+    if ((credentials || authUrl) && jsonData && sheetName && sheetId) {
+      try {
+        await pushSpreadSheet({
+          authUrl,
+          credentials,
+          sheetName,
+          sheetId,
+          jsonData: replaceVariables(jsonData, variablesObj || {}),
+        });
+      } catch (err) {
+        console.error(`❌ Google Sheets ${node.id} failed:`, err.message);
+      }
+    } else {
+      console.warn(`⚠️ Google Sheets ${node.id} skipped: credentials, sheet ID, sheet name and columns are required`);
     }
 
     const e = edges.find((e) => e.source === node.id);
@@ -1714,7 +1781,7 @@ async function processSpreadSheet({
       [JSON.stringify(newData), element?.flow_id, uid, message?.senderMobile],
     );
 
-    return { moveToNextNode: node?.data?.moveToNextNode || false };
+    return { moveToNextNode: shouldContinue(node) };
   } catch (err) {
     console.log(err);
     return {};
@@ -1737,33 +1804,35 @@ async function processSendEmail({
 }) {
   try {
     const { uid } = user;
-    const {
-      host,
-      port,
-      email,
-      pass,
-      username,
-      from,
-      to,
-      subject,
-      html,
-      security,
-      useAuth,
-    } = node.data;
+    const d = node.data || {};
+    const vars = variablesObj || {};
+    const resolveText = (v) => (v ? String(replaceVariables(String(v), vars)) : "");
 
-    await sendEmailBeta({
-      host,
-      port,
-      email,
-      pass,
-      username,
-      from,
-      to: replaceVarFromString(to, variablesObj),
-      subject: replaceVarFromString(subject, variablesObj),
-      html: replaceVarFromString(html, variablesObj),
-      security,
-      useAuth,
-    });
+    // Legacy editor fields: toEmail / emailBody (plain text).
+    const to = resolveText(d.to || d.toEmail).trim();
+    const subject = resolveText(d.subject);
+    const htmlRaw = d.html || (d.emailBody ? String(d.emailBody).replace(/\n/g, "<br>") : "");
+    const html = resolveText(htmlRaw);
+    const port = parseInt(d.port, 10) || 587;
+
+    if (!d.host || !to) {
+      console.warn(`⚠️ Send Email ${node.id} skipped: SMTP host and recipient are required`);
+    } else {
+      const sent = await sendEmailBeta({
+        host: d.host,
+        port,
+        email: d.email,
+        pass: d.pass,
+        username: d.username || d.email,
+        from: d.from || d.username || d.email,
+        to,
+        subject,
+        html,
+        security: d.security,
+        useAuth: d.useAuth !== false,
+      });
+      if (!sent?.success) console.error(`❌ Send Email ${node.id} failed:`, sent?.msg);
+    }
 
     const e = edges.find((e) => e.source === node.id);
     if (!e) return {};
@@ -1777,7 +1846,7 @@ async function processSendEmail({
       [JSON.stringify(newData), element?.flow_id, uid, message?.senderMobile],
     );
 
-    return { moveToNextNode: node?.data?.moveToNextNode || false };
+    return { moveToNextNode: shouldContinue(node) };
   } catch (err) {
     console.log(err);
     return {};
@@ -1814,7 +1883,7 @@ async function processAgentTransfer({
       if (allAgents?.length > 0) {
         agentNewData = allAgents; // This will be an array of all agents
       } else {
-        return { moveToNextNode: node?.data?.moveToNextNode || false };
+        console.warn(`⚠️ Agent Transfer ${node.id}: no active agents to assign`);
       }
     } else if (autoAgentSelect) {
       // Auto-select a random single agent
@@ -1827,7 +1896,7 @@ async function processAgentTransfer({
         const randomAgent = agents[Math.floor(Math.random() * agents.length)];
         agentNewData = [randomAgent]; // Wrap in array for consistency
       } else {
-        return { moveToNextNode: node?.data?.moveToNextNode || false };
+        console.warn(`⚠️ Agent Transfer ${node.id}: no active agents to assign`);
       }
     } else {
       // Manual agent selection
@@ -1867,7 +1936,7 @@ async function processAgentTransfer({
       [JSON.stringify(newData), element?.flow_id, uid, message?.senderMobile],
     );
 
-    return { moveToNextNode: node?.data?.moveToNextNode || false };
+    return { moveToNextNode: shouldContinue(node) };
   } catch (err) {
     console.log(err);
     return {};
@@ -2079,7 +2148,7 @@ async function processMysqlQuery({
       flowSession,
     });
 
-    return { moveToNextNode: node?.data?.moveToNextNode || false };
+    return { moveToNextNode: shouldContinue(node) };
   } catch (err) {
     console.log(err);
     return {};
@@ -2134,7 +2203,7 @@ async function processResetSession({
          LIMIT 1`,
         [uid, origin, sessionId, element?.flow_id, message.senderMobile],
       );
-    } else if (origin?.toLowerCase() === "telegram") {
+    } else if (origin?.toLowerCase() === "telegram" || origin?.toLowerCase() === "webchat") {
       await query(
         `DELETE FROM flow_session 
          WHERE uid = ? AND origin = ? AND origin_id = ? AND flow_id = ? AND sender_mobile = ? 
@@ -2216,7 +2285,34 @@ async function processSetChatLabel({
 }) {
   try {
     const { uid } = user;
-    const { labelsToAdd = [], labelsToRemove = [] } = node.data;
+    let { labelsToAdd = [], labelsToRemove = [] } = node.data;
+
+    // Label names (from the AI flow builder or older flows) → chat_tags rows.
+    // Missing labels are created so the tag actually appears in the inbox.
+    const namesToTags = async (names) => {
+      const out = [];
+      for (const raw of names || []) {
+        const title = String(raw || "").trim().slice(0, 12);
+        if (!title) continue;
+        let [tag] = await query(
+          `SELECT * FROM chat_tags WHERE uid = ? AND LOWER(title) = LOWER(?) LIMIT 1`,
+          [uid, title],
+        );
+        if (!tag) {
+          const ins = await query(`INSERT INTO chat_tags (uid, title, hex) VALUES (?, ?, ?)`, [
+            uid,
+            title,
+            "#25d366",
+          ]);
+          [tag] = await query(`SELECT * FROM chat_tags WHERE id = ? LIMIT 1`, [ins.insertId]);
+        }
+        if (tag) out.push(tag);
+      }
+      return out;
+    };
+    if ((!labelsToAdd || !labelsToAdd.length) && Array.isArray(node.data?.labels)) {
+      labelsToAdd = await namesToTags(node.data.labels);
+    }
 
     // ── Fetch current chat_label from beta_chats ──
     const [chat] = await query(
@@ -2267,7 +2363,7 @@ async function processSetChatLabel({
       [JSON.stringify(newData), element?.flow_id, uid, message?.senderMobile],
     );
 
-    return { moveToNextNode: node?.data?.moveToNextNode || false };
+    return { moveToNextNode: shouldContinue(node) };
   } catch (err) {
     console.error("❌ Error in processSetChatLabel:", err);
     return {};
@@ -2661,7 +2757,7 @@ async function processSendWaTemplate({
         },
       };
 
-      if (origin === "qr" || origin === "telegram") {
+      if (origin === "qr" || origin === "telegram" || origin === "webchat") {
         console.warn(
           "⚠️ SEND_WA_TEMPLATE: Templates only supported on Meta origin. Skipping.",
         );
@@ -2753,7 +2849,7 @@ async function processSendWaTemplate({
       [JSON.stringify(newData), element?.flow_id, uid, message?.senderMobile],
     );
 
-    return { moveToNextNode: node?.data?.moveToNextNode || false };
+    return { moveToNextNode: shouldContinue(node) };
   } catch (err) {
     console.error("❌ Error in processSendWaTemplate:", err);
     return {};
@@ -3020,4 +3116,5 @@ module.exports = {
   processSendWaTemplate,
   processSetChatLabel,
   processSendWaForm,
+  sendWaMessage,
 };

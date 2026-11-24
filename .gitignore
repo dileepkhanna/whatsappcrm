@@ -374,3 +374,9 @@ NOTES.md
 # Inbox debug log (contains access tokens) and local browser-test output
 routes/log.txt
 .playwright-mcp/
+
+# Built frontend chunks must always be deployed. Without this, the rules above
+# (check-*.js, test-*.js, fix-*.js, debug-*.js) silently skip bundles such as
+# frontend/dist/assets/Check-XXXX.js and the app fails to load pages on the server.
+!frontend/dist/assets/*.js
+!frontend/dist/assets/*.css

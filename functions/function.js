@@ -2229,6 +2229,13 @@ function addDaysToCurrentTimestamp(days) {
 // update user plan
 async function updateUserPlan(plan, uid) {
   console.log({ plan });
+
+  // Add-ons do not replace the user's base plan: they are layered on top of it.
+  if (plan?.plan_type === "addon") {
+    await require("../helper/addons.js").activateAddon(plan, uid);
+    return;
+  }
+
   const planDays = parseInt(plan?.plan_duration_in_days || 0);
   const timeStamp = addDaysToCurrentTimestamp(planDays);
   
@@ -2241,6 +2248,13 @@ async function updateUserPlan(plan, uid) {
     mysqlDatetime,
     uid,
   ]);
+
+  // Re-apply any active add-ons on top of the new base plan.
+  try {
+    await require("../helper/addons.js").recomputeUserPlan(uid);
+  } catch (e) {
+    console.log("[addons] recompute after plan change failed:", e.message);
+  }
 }
 
 function validateEmail(email) {

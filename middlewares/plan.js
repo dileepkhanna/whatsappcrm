@@ -20,31 +20,47 @@ const resolveEffectivePlan = async (rawPlan) => {
   }
   if (!snapshot || typeof snapshot !== "object") return null;
 
+  // A snapshot with add-ons keeps the original base plan in _base.
+  const addons = require("../helper/addons.js");
+  const baseSnap = addons.baseOf(snapshot);
+  const addonMeta = Array.isArray(snapshot._addons) ? snapshot._addons : [];
+
   try {
     let live = null;
 
     // 1. Try to match the live plan by id.
-    if (snapshot.id) {
+    if (baseSnap.id) {
       const rows = await query(`SELECT * FROM plan WHERE id = ?`, [
-        snapshot.id,
+        baseSnap.id,
       ]);
       live = rows[0] || null;
     }
 
     // 2. Fall back to matching by title (handles snapshots with a missing id,
     //    or plans that were deleted and recreated with a new id).
-    if (!live && snapshot.title) {
+    if (!live && baseSnap.title) {
       const rows = await query(`SELECT * FROM plan WHERE title = ? LIMIT 1`, [
-        snapshot.title,
+        baseSnap.title,
       ]);
       live = rows[0] || null;
     }
 
-    if (!live) return snapshot;
-
     // Merge: live flags win, but keep any snapshot-only fields (e.g. purchase
     // metadata) that the live row doesn't have.
-    return { ...snapshot, ...live };
+    let result = live ? { ...baseSnap, ...live } : baseSnap;
+
+    // Layer the add-ons that have not expired yet (live permissions).
+    const now = Date.now();
+    const active = addonMeta.filter((a) => new Date(a.expires).getTime() > now);
+    if (active.length) {
+      const rows = await query(`SELECT * FROM plan WHERE id IN (?)`, [
+        active.map((a) => a.id),
+      ]);
+      result = addons.mergeAddons(result, rows);
+      result._addons = active;
+    }
+
+    return result;
   } catch (e) {
     console.error("resolveEffectivePlan error:", e.message);
     return snapshot;
@@ -257,6 +273,23 @@ const checkWaCall = async (req, res, next) => {
   }
 };
 
+// AI Phone Calling (Twilio) - separate from AI WhatsApp Calling (allow_wa_call)
+const checkAiVoice = async (req, res, next) => {
+  try {
+    if (req.plan?.allow_ai_voice > 0) {
+      next();
+    } else {
+      return res.json({
+        success: false,
+        msg: "Your plan does not include AI Phone Calling",
+      });
+    }
+  } catch (err) {
+    console.log(err);
+    res.json({ msg: "server error", err });
+  }
+};
+
 const checkWebhook = async (req, res, next) => {
   try {
     if (req.plan?.allow_webhook > 0) {
@@ -316,6 +349,7 @@ module.exports = {
   checkInstaInbox,
   checkTeleInbox,
   checkWaCall,
+  checkAiVoice,
   checkWebhook,
   checkChatWidget,
   checkAgents,

@@ -1913,6 +1913,9 @@ router.post("/create_stripe_session", validateUser, async (req, res) => {
       return res.json({ msg: "No plan found with the id" });
     }
 
+    const addonBlock = await require("../helper/addons.js").getAddonBlock(plan[0], req.decode.uid);
+    if (addonBlock) return res.json({ success: false, msg: addonBlock });
+
     const randomSt = randomstring.generate();
     const orderID = `STRIPE_${randomSt}`;
 
@@ -1972,6 +1975,11 @@ router.post("/pay_with_rz", validateUser, async (req, res) => {
       return res.json({
         msg: "Invalid plan found",
       });
+    }
+
+    {
+      const addonBlock = await require("../helper/addons.js").getAddonBlock(getPlan[0], req.decode.uid);
+      if (addonBlock) return res.json({ success: false, msg: addonBlock });
     }
 
     // getting private web
@@ -2039,6 +2047,11 @@ router.post("/pay_with_paypal", validateUser, async (req, res) => {
       return res.json({
         msg: "Invalid plan found",
       });
+    }
+
+    {
+      const addonBlock = await require("../helper/addons.js").getAddonBlock(getPlan[0], req.decode.uid);
+      if (addonBlock) return res.json({ success: false, msg: addonBlock });
     }
 
     // getting private web
@@ -2227,6 +2240,10 @@ router.post("/pay_with_paystack", validateUser, async (req, res) => {
     if (plan.length < 1) {
       return res.json({ msg: "Sorry this plan was not found" });
     }
+
+    const addonBlock = await require("../helper/addons.js").getAddonBlock(plan[0], req.decode.uid);
+    if (addonBlock) return res.json({ success: false, msg: addonBlock });
+
 
     // gettings paystack keys
     const getWebPrivate = await query(`SELECT * FROM web_private`, []);
@@ -2495,7 +2512,7 @@ router.post("/start_free_trial", validateUser, async (req, res) => {
       return res.json({ msg: "Invalid plan found" });
     }
 
-    if (getPlan[0]?.price > 0) {
+    if (getPlan[0]?.price > 0 || getPlan[0]?.plan_type === "addon") {
       return res.json({ msg: "This plan is not a trial plan." });
     }
     await query(
@@ -2538,6 +2555,10 @@ router.post("/renew_free_plan", validateUser, async (req, res) => {
         msg: "This is a paid plan. Please complete payment to activate it.",
       });
     }
+
+    const addonBlock = await require("../helper/addons.js").getAddonBlock(plan, req.decode.uid);
+    if (addonBlock) return res.json({ success: false, msg: addonBlock });
+
 
     await updateUserPlan(plan, req.decode.uid);
 
@@ -4418,6 +4439,9 @@ router.post(
       if (plan.length < 1) {
         return res.json({ msg: "No plan found with the id" });
       }
+
+      const addonBlock = await require("../helper/addons.js").getAddonBlock(plan[0], req.decode.uid);
+      if (addonBlock) return res.json({ success: false, msg: addonBlock });
 
       const randomSt = randomstring.generate();
       const orderID = `MERCADOPAGO_${randomSt}`;

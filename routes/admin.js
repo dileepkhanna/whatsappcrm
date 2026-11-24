@@ -169,18 +169,23 @@ router.post("/add_plan", adminValidator, async (req, res) => {
       allow_webhook,
       allow_chat_widget,
       allow_agents,
+      allow_ai_voice,
+      ai_voice_minutes,
+      plan_type,
     } = req.body;
 
     if (!title || !short_description || !plan_duration_in_days) {
       return res.json({ success: false, msg: "Please fill details" });
     }
 
+    await require("../helper/addons.js").ensureAddonTables();
     await query(
       `INSERT INTO plan (title, short_description, allow_tag, allow_note, allow_chatbot, 
         contact_limit, allow_api, is_trial, price, price_strike, plan_duration_in_days, 
         qr_account, wa_warmer, rest_api_qr, instagram_inbox, telegram_inbox, allow_wa_forms,
-        allow_wa_call, allow_webhook, allow_chat_widget, allow_agents) 
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, // ✅ 21 values
+        allow_wa_call, allow_webhook, allow_chat_widget, allow_agents,
+        allow_ai_voice, ai_voice_minutes, plan_type) 
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, // 24 values
       [
         title,
         short_description,
@@ -203,6 +208,9 @@ router.post("/add_plan", adminValidator, async (req, res) => {
         allow_webhook ? 1 : 0,
         allow_chat_widget ? 1 : 0,
         allow_agents ? 1 : 0,
+        allow_ai_voice ? 1 : 0,
+        Math.max(0, parseInt(ai_voice_minutes) || 0),
+        plan_type === "addon" ? "addon" : "base",
       ],
     );
 
@@ -239,12 +247,16 @@ router.post("/update_plan_data", adminValidator, async (req, res) => {
       allow_webhook,
       allow_chat_widget,
       allow_agents,
+      allow_ai_voice,
+      ai_voice_minutes,
+      plan_type,
     } = req.body;
 
     if (!id) return res.json({ success: false, msg: "Plan ID is required" });
     if (!title || !short_description || !plan_duration_in_days)
       return res.json({ success: false, msg: "Please fill all details" });
 
+    await require("../helper/addons.js").ensureAddonTables();
     await query(
       `UPDATE plan SET 
         title = ?, short_description = ?, allow_tag = ?, allow_note = ?,
@@ -253,7 +265,8 @@ router.post("/update_plan_data", adminValidator, async (req, res) => {
         qr_account = ?, wa_warmer = ?, rest_api_qr = ?,
         instagram_inbox = ?, telegram_inbox = ?,
         allow_wa_forms = ?,
-        allow_wa_call = ?, allow_webhook = ?, allow_chat_widget = ?, allow_agents = ?
+        allow_wa_call = ?, allow_webhook = ?, allow_chat_widget = ?, allow_agents = ?,
+        allow_ai_voice = ?, ai_voice_minutes = ?, plan_type = ?
        WHERE id = ?`,
       [
         title,
@@ -277,6 +290,9 @@ router.post("/update_plan_data", adminValidator, async (req, res) => {
         allow_webhook ? 1 : 0,
         allow_chat_widget ? 1 : 0,
         allow_agents ? 1 : 0,
+        allow_ai_voice ? 1 : 0,
+        Math.max(0, parseInt(ai_voice_minutes) || 0),
+        plan_type === "addon" ? "addon" : "base",
         id,
       ],
     );
@@ -452,6 +468,9 @@ router.post("/update_plan", adminValidator, async (req, res) => {
     if (getPlan.length < 1) {
       return res.json({ success: false, msg: "Invalid plan found" });
     }
+
+    const addonBlock = await require("../helper/addons.js").getAddonBlock(getPlan[0], uid);
+    if (addonBlock) return res.json({ success: false, msg: addonBlock });
 
     await updateUserPlan(getPlan[0], uid);
 

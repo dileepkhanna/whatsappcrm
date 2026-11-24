@@ -40,6 +40,7 @@ app.use("/api/webhook", require("./routes/webhook"));
 app.use("/api/webpush", require("./routes/webPush"));
 app.use("/api/ai_settings", require("./routes/aiSettings"));
 app.use("/api/wa_call", require("./routes/waCall"));
+app.use("/api/voice_call", require("./routes/voiceCall")); // AI Phone Calling (Twilio)
 app.use("/api/telegram", require("./routes/telegram"));
 app.use("/api/theme", require("./routes/theme"));
 app.use("/api/insta", require("./routes/insta"));
@@ -193,6 +194,27 @@ const server = app.listen(process.env.PORT || 3010, () => {
   // ─── Socket.IO MUST be initialized BEFORE QR module ──────────────────────────
   const { initializeSocket } = require("./socket");
   const io = initializeSocket(server);
+
+  // ─── Plan add-ons: tables + expiry sweeper ────────────────────────────────────
+  try {
+    const addons = require("./helper/addons");
+    addons
+      .ensureAddonTables()
+      .then(() => addons.startSweeper())
+      .catch((e) => console.error("Add-ons init error (non-fatal):", e.message));
+  } catch (e) {
+    console.error("Add-ons init error (non-fatal):", e.message);
+  }
+
+  // ─── AI Phone Calling (Twilio): media stream WebSocket + tables ───────────────
+  try {
+    require("./helper/addon/voicecall/mediaServer").attach(server);
+    require("./helper/addon/voicecall/store").ensureTables().catch((e) =>
+      console.error("Voice calling tables error (non-fatal):", e.message),
+    );
+  } catch (e) {
+    console.error("Voice calling init error (non-fatal):", e.message);
+  }
   
   console.log("🔍 DEBUG: io type =", typeof io);
   console.log("🔍 DEBUG: io exists =", !!io);
@@ -208,6 +230,11 @@ const server = app.listen(process.env.PORT || 3010, () => {
   setTimeout(() => {
     warmerLoopInit(); // ✅ ENABLED - WhatsApp number warmer (QR devices only)
     initCampaign(); // ✅ ENABLED - Process campaigns
+    try {
+      require("./helper/addon/voicecall/dialer").start(); // AI Phone Calling auto-dialer
+    } catch (e) {
+      console.error("Voice dialer start error (non-fatal):", e.message);
+    }
     // initTele(); // Uncomment if using Telegram
   }, 1000);
 });

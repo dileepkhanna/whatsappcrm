@@ -29,6 +29,27 @@ function ensureAddonTables() {
       if (cols.length === 0) {
         await query(`ALTER TABLE plan ADD COLUMN plan_type varchar(20) NOT NULL DEFAULT 'base'`, []);
       }
+      // Enterprise / "talk to sales" plans: no online checkout, sales activates them.
+      const pm = await query(`SHOW COLUMNS FROM plan LIKE 'pricing_mode'`, []);
+      if (pm.length === 0) {
+        await query(`ALTER TABLE plan ADD COLUMN pricing_mode varchar(20) NOT NULL DEFAULT 'fixed'`, []);
+      }
+      const sc = await query(`SHOW COLUMNS FROM plan LIKE 'sales_contact'`, []);
+      if (sc.length === 0) {
+        await query(`ALTER TABLE plan ADD COLUMN sales_contact varchar(255) DEFAULT NULL`, []);
+      }
+      // Free-text content for the Enterprise card (tagline, feature list, rates box).
+      for (const [col, def] of [
+        ["tagline", "varchar(255) DEFAULT NULL"],
+        ["custom_features", "text DEFAULT NULL"],
+        ["rates_title", "varchar(100) DEFAULT NULL"],
+        ["rate_rows", "text DEFAULT NULL"],
+      ]) {
+        const exists = await query(`SHOW COLUMNS FROM plan LIKE '${col}'`, []);
+        if (exists.length === 0) {
+          await query(`ALTER TABLE plan ADD COLUMN ${col} ${def}`, []);
+        }
+      }
       await query(
         `CREATE TABLE IF NOT EXISTS user_addons (
           id int(11) NOT NULL AUTO_INCREMENT,
@@ -131,8 +152,15 @@ async function recomputeUserPlan(uid) {
   }
 }
 
-/** Returns a message when `plan` cannot be bought by `uid`, else null. */
-async function getAddonBlock(plan, uid) {
+/**
+ * Returns a message when `plan` cannot be bought by `uid`, else null.
+ * - "talk to sales" plans cannot be bought online (opts.skipSales lets the admin assign them)
+ * - add-ons need an active base plan
+ */
+async function getAddonBlock(plan, uid, opts = {}) {
+  if (plan && plan.pricing_mode === "contact_sales" && !opts.skipSales) {
+    return "This plan is available by contacting sales. Please use the Talk to sales button.";
+  }
   if (!plan || plan.plan_type !== "addon") return null;
   const [user] = await query(`SELECT plan, plan_expire FROM user WHERE uid = ?`, [uid]);
   const hasBase = !!parse(user?.plan);

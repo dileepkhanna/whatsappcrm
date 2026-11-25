@@ -1997,14 +1997,21 @@ router.post("/pay_with_rz", validateUser, async (req, res) => {
 
     // IMPORTANT: Use plan price directly from database (ignore frontend amount)
     // Frontend multiplies by cached exchange rate, so we use database value directly
-    const finalamt = Math.round(parseFloat(getPlan[0].price));
-    
+    // 18% GST is added on top of the plan price for Razorpay payments.
+    // Total in paise = price x 118. The frontend (Subscription.tsx gstPaise)
+    // charges the same amount, and Razorpay only captures what was authorised.
+    const GST_PERCENT = 18;
+    const basePrice = parseFloat(getPlan[0].price);
+    const totalPaise = Math.round(basePrice * (100 + GST_PERCENT));
+    const totalRupees = totalPaise / 100;
+    const gstRupees = (totalPaise - Math.round(basePrice * 100)) / 100;
+
     const currencySymbol = webPublic?.currency_symbol || '₹';
-    console.log(`💰 Payment: ${currencySymbol}${finalamt} (Using plan price from database, ignoring frontend calculation)`);
+    console.log(`💰 Payment: ${currencySymbol}${basePrice} + ${GST_PERCENT}% GST = ${currencySymbol}${totalRupees} (price taken from the database, not from the browser)`);
 
     const resp = await rzCapturePayment(
       rz_payment_id,
-      Math.round(finalamt) * 100, // Convert to paise
+      totalPaise,
       rzId,
       rzKeys,
     );
@@ -2018,7 +2025,18 @@ router.post("/pay_with_rz", validateUser, async (req, res) => {
 
     await query(
       `INSERT INTO orders (uid, payment_mode, amount, data) VALUES (?,?,?,?)`,
-      [req.decode.uid, "RAZORPAY", getPlan[0].price, JSON.stringify(resp)],
+      [
+        req.decode.uid,
+        "RAZORPAY",
+        totalRupees, // amount actually paid, GST included
+        JSON.stringify({
+          ...resp,
+          plan_price: basePrice,
+          gst_percent: GST_PERCENT,
+          gst_amount: gstRupees,
+          total_paid: totalRupees,
+        }),
+      ],
     );
 
     res.json({
@@ -2512,7 +2530,11 @@ router.post("/start_free_trial", validateUser, async (req, res) => {
       return res.json({ msg: "Invalid plan found" });
     }
 
-    if (getPlan[0]?.price > 0 || getPlan[0]?.plan_type === "addon") {
+    if (
+      getPlan[0]?.price > 0 ||
+      getPlan[0]?.plan_type === "addon" ||
+      getPlan[0]?.pricing_mode === "contact_sales"
+    ) {
       return res.json({ msg: "This plan is not a trial plan." });
     }
     await query(

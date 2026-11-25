@@ -144,6 +144,21 @@ router.post("/login", async (req, res) => {
   }
 });
 
+// Plan card text helpers: trimmed, length limited, null when empty.
+function cleanText(raw, max) {
+  const s = String(raw || "").trim().slice(0, max);
+  return s || null;
+}
+// One item per line (max 30 lines of 120 characters by default).
+function cleanLines(raw, maxLines = 30) {
+  const lines = String(raw || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim().slice(0, 120))
+    .filter(Boolean)
+    .slice(0, maxLines);
+  return lines.length ? lines.join("\n") : null;
+}
+
 // add new plan
 router.post("/add_plan", adminValidator, async (req, res) => {
   try {
@@ -172,10 +187,20 @@ router.post("/add_plan", adminValidator, async (req, res) => {
       allow_ai_voice,
       ai_voice_minutes,
       plan_type,
+      pricing_mode,
+      sales_contact,
+      tagline,
+      custom_features,
+      rates_title,
+      rate_rows,
     } = req.body;
 
     if (!title || !short_description || !plan_duration_in_days) {
       return res.json({ success: false, msg: "Please fill details" });
+    }
+    const isSalesPlan = pricing_mode === "contact_sales";
+    if (isSalesPlan && !String(sales_contact || "").trim()) {
+      return res.json({ success: false, msg: "Enter a sales contact (WhatsApp number, email or link)" });
     }
 
     await require("../helper/addons.js").ensureAddonTables();
@@ -184,8 +209,9 @@ router.post("/add_plan", adminValidator, async (req, res) => {
         contact_limit, allow_api, is_trial, price, price_strike, plan_duration_in_days, 
         qr_account, wa_warmer, rest_api_qr, instagram_inbox, telegram_inbox, allow_wa_forms,
         allow_wa_call, allow_webhook, allow_chat_widget, allow_agents,
-        allow_ai_voice, ai_voice_minutes, plan_type) 
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, // 24 values
+        allow_ai_voice, ai_voice_minutes, plan_type, pricing_mode, sales_contact,
+        tagline, custom_features, rates_title, rate_rows) 
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, // 30 values
       [
         title,
         short_description,
@@ -211,6 +237,12 @@ router.post("/add_plan", adminValidator, async (req, res) => {
         allow_ai_voice ? 1 : 0,
         Math.max(0, parseInt(ai_voice_minutes) || 0),
         plan_type === "addon" ? "addon" : "base",
+        isSalesPlan ? "contact_sales" : "fixed",
+        isSalesPlan ? String(sales_contact).trim().slice(0, 255) : null,
+        cleanText(tagline, 255),
+        cleanLines(custom_features),
+        cleanText(rates_title, 100),
+        cleanLines(rate_rows, 12),
       ],
     );
 
@@ -250,9 +282,19 @@ router.post("/update_plan_data", adminValidator, async (req, res) => {
       allow_ai_voice,
       ai_voice_minutes,
       plan_type,
+      pricing_mode,
+      sales_contact,
+      tagline,
+      custom_features,
+      rates_title,
+      rate_rows,
     } = req.body;
 
     if (!id) return res.json({ success: false, msg: "Plan ID is required" });
+    const isSalesPlan = pricing_mode === "contact_sales";
+    if (isSalesPlan && !String(sales_contact || "").trim()) {
+      return res.json({ success: false, msg: "Enter a sales contact (WhatsApp number, email or link)" });
+    }
     if (!title || !short_description || !plan_duration_in_days)
       return res.json({ success: false, msg: "Please fill all details" });
 
@@ -266,7 +308,9 @@ router.post("/update_plan_data", adminValidator, async (req, res) => {
         instagram_inbox = ?, telegram_inbox = ?,
         allow_wa_forms = ?,
         allow_wa_call = ?, allow_webhook = ?, allow_chat_widget = ?, allow_agents = ?,
-        allow_ai_voice = ?, ai_voice_minutes = ?, plan_type = ?
+        allow_ai_voice = ?, ai_voice_minutes = ?, plan_type = ?,
+        pricing_mode = ?, sales_contact = ?,
+        tagline = ?, custom_features = ?, rates_title = ?, rate_rows = ?
        WHERE id = ?`,
       [
         title,
@@ -293,6 +337,12 @@ router.post("/update_plan_data", adminValidator, async (req, res) => {
         allow_ai_voice ? 1 : 0,
         Math.max(0, parseInt(ai_voice_minutes) || 0),
         plan_type === "addon" ? "addon" : "base",
+        isSalesPlan ? "contact_sales" : "fixed",
+        isSalesPlan ? String(sales_contact).trim().slice(0, 255) : null,
+        cleanText(tagline, 255),
+        cleanLines(custom_features),
+        cleanText(rates_title, 100),
+        cleanLines(rate_rows, 12),
         id,
       ],
     );
@@ -469,7 +519,8 @@ router.post("/update_plan", adminValidator, async (req, res) => {
       return res.json({ success: false, msg: "Invalid plan found" });
     }
 
-    const addonBlock = await require("../helper/addons.js").getAddonBlock(getPlan[0], uid);
+    // admin may assign "talk to sales" plans (that is how sales activates them)
+    const addonBlock = await require("../helper/addons.js").getAddonBlock(getPlan[0], uid, { skipSales: true });
     if (addonBlock) return res.json({ success: false, msg: addonBlock });
 
     await updateUserPlan(getPlan[0], uid);
